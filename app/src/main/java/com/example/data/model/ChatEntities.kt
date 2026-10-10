@@ -18,7 +18,8 @@ enum class ActiveToolType(val id: String) {
     CODING("coding"),
     STUDY("study"),
     VOICE("voice"),
-    REASONING("reasoning")
+    REASONING("reasoning"),
+    ADVANCED_RESEARCH("advanced_research")
 }
 
 data class WebSource(

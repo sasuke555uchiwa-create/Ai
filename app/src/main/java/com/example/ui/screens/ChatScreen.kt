@@ -20,10 +20,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,14 +52,18 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.PlayCircleOutline
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Science
 import androidx.compose.material.icons.filled.Share
@@ -139,29 +146,55 @@ fun ChatScreen(
     val scope = rememberCoroutineScope()
     var modelMenuExpanded by remember { mutableStateOf(false) }
 
-    // Photo Picker
+    // Camera Capture Launcher (TakePicturePreview)
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicturePreview()
+    ) { bitmap: Bitmap? ->
+        if (bitmap != null) {
+            scope.launch {
+                try {
+                    val out = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                    val base64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                    viewModel.setSelectedImage(base64, "Camera_${System.currentTimeMillis() % 10000}.jpg")
+                    Toast.makeText(context, "Photo captured!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Failed to capture photo: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // Photo Picker Launcher
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
             scope.launch {
                 try {
+                    var displayName = "photo.jpg"
+                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex != -1 && cursor.moveToFirst()) {
+                            displayName = cursor.getString(nameIndex) ?: "photo.jpg"
+                        }
+                    }
                     context.contentResolver.openInputStream(uri)?.use { stream ->
                         val bytes = stream.readBytes()
                         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                         val out = ByteArrayOutputStream()
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 75, out)
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
                         val base64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
-                        viewModel.setSelectedImage(base64)
+                        viewModel.setSelectedImage(base64, displayName)
                     }
                 } catch (e: Exception) {
-                    Toast.makeText(context, "Failed to load image: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Failed to load photo: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
-    // Document Picker
+    // Document Picker Launcher (PDF and text files)
     val documentPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -169,16 +202,47 @@ fun ChatScreen(
             scope.launch {
                 try {
                     var displayName = "document.txt"
+                    var fileSize: Long = 0
                     context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                         val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                        if (nameIndex != -1 && cursor.moveToFirst()) {
-                            displayName = cursor.getString(nameIndex) ?: "document.txt"
+                        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (cursor.moveToFirst()) {
+                            if (nameIndex != -1) displayName = cursor.getString(nameIndex) ?: "document.txt"
+                            if (sizeIndex != -1) fileSize = cursor.getLong(sizeIndex)
                         }
                     }
 
-                    context.contentResolver.openInputStream(uri)?.use { stream ->
-                        val text = stream.bufferedReader().use { it.readText() }
-                        viewModel.attachDocument(displayName, text.take(30000))
+                    if (fileSize > 20 * 1024 * 1024) {
+                        Toast.makeText(context, "File size exceeds 20MB limit", Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
+
+                    val mimeType = context.contentResolver.getType(uri) ?: ""
+                    val isPdf = displayName.endsWith(".pdf", true) || mimeType.equals("application/pdf", true)
+
+                    fun formatSize(bytes: Long): String {
+                        return when {
+                            bytes >= 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+                            bytes >= 1024 -> String.format("%.1f KB", bytes / 1024.0)
+                            else -> "$bytes B"
+                        }
+                    }
+
+                    if (isPdf) {
+                        context.contentResolver.openInputStream(uri)?.use { stream ->
+                            val bytes = stream.readBytes()
+                            val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                            val sizeFormatted = formatSize(bytes.size.toLong())
+                            viewModel.attachPdfDocument(displayName, base64, sizeFormatted)
+                            Toast.makeText(context, "PDF attached: $displayName", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        context.contentResolver.openInputStream(uri)?.use { stream ->
+                            val text = stream.bufferedReader().use { it.readText() }
+                            val sizeFormatted = formatSize(text.toByteArray().size.toLong())
+                            viewModel.attachTextDocument(displayName, text.take(50000), sizeFormatted)
+                            Toast.makeText(context, "Document attached: $displayName", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 } catch (e: Exception) {
                     Toast.makeText(context, "Failed to load document: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -496,83 +560,173 @@ fun ChatScreen(
             }
         }
 
-        // Active Tool Staging Chip & Attachments Bar above input
-        if (uiState.activeTool != ActiveToolType.NONE || uiState.selectedImageBase64 != null || uiState.attachedFileName != null) {
+        // Removable Staging Chips Bar above input (Individual chips for Photos, Documents, and AI Tools)
+        if (uiState.attachedImageBase64 != null || uiState.attachedFileName != null || uiState.activeTool != ActiveToolType.NONE) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f),
+                shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp)
-                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                    .padding(horizontal = 8.dp)
+                    .border(
+                        1.dp,
+                        MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
+                        RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+                    )
                     .testTag("active_tool_staging_banner")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        when (uiState.activeTool) {
-                            ActiveToolType.IMAGE_GEN -> {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = SasukeNeonCyan, modifier = Modifier.size(16.dp))
-                                Text("Generate Image (1:1)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeNeonCyan)
-                            }
-                            ActiveToolType.VIDEO_GEN -> {
-                                Icon(Icons.Default.Videocam, contentDescription = null, tint = SasukeAmberWarning, modifier = Modifier.size(16.dp))
-                                Text("Generate Video (Veo 3.1)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeAmberWarning)
-                            }
-                            ActiveToolType.WEB_SEARCH -> {
-                                Icon(Icons.Default.Language, contentDescription = null, tint = SasukeGreenSuccess, modifier = Modifier.size(16.dp))
-                                Text("Live Web Grounding", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeGreenSuccess)
-                            }
-                            ActiveToolType.DOCUMENT -> {
-                                Icon(Icons.Default.Description, contentDescription = null, tint = SasukeNeonCyan, modifier = Modifier.size(16.dp))
-                                Text("Doc: ${uiState.attachedFileName ?: "Attached"}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeNeonCyan)
-                            }
-                            ActiveToolType.MODEL_ARENA -> {
-                                Icon(Icons.AutoMirrored.Filled.CompareArrows, contentDescription = null, tint = SasukeLightViolet, modifier = Modifier.size(16.dp))
-                                Text("Compare: Flash vs Pro", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeLightViolet)
-                            }
-                            ActiveToolType.CODING -> {
-                                Icon(Icons.Default.Code, contentDescription = null, tint = SasukeNeonCyan, modifier = Modifier.size(16.dp))
-                                Text("Coding Assistant Mode", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeNeonCyan)
-                            }
-                            ActiveToolType.STUDY -> {
-                                Icon(Icons.Default.Science, contentDescription = null, tint = SasukeGreenSuccess, modifier = Modifier.size(16.dp))
-                                Text("Science & STEM Study Mode", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeGreenSuccess)
-                            }
-                            ActiveToolType.VOICE -> {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = SasukeLightViolet, modifier = Modifier.size(16.dp))
-                                Text("Conversational Voice Mode", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeLightViolet)
-                            }
-                            ActiveToolType.REASONING -> {
-                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = SasukeNeonCyan, modifier = Modifier.size(16.dp))
-                                Text("Deep Reasoning (Pro 3.1)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeNeonCyan)
-                            }
-                            else -> {
-                                if (uiState.selectedImageBase64 != null) {
-                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = SasukeNeonCyan, modifier = Modifier.size(16.dp))
-                                    Text("Image Attached", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeNeonCyan)
+                    // 1. Attached Image Chip (Removable)
+                    if (uiState.attachedImageBase64 != null) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = SasukeCobaltBlue.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, SasukeCobaltBlue.copy(alpha = 0.6f)),
+                            modifier = Modifier.testTag("staging_chip_image")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Image,
+                                    contentDescription = null,
+                                    tint = SasukeNeonCyan,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = uiState.attachedImageName ?: AppStrings.get("chip_photo", currentLanguage),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1
+                                )
+                                IconButton(
+                                    onClick = { viewModel.removeAttachedImage() },
+                                    modifier = Modifier.size(24.dp).testTag("remove_image_chip_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Remove photo",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp)
+                                    )
                                 }
                             }
                         }
                     }
 
-                    // Remove tool button
-                    IconButton(
-                        onClick = {
-                            viewModel.clearActiveTool()
-                            viewModel.setSelectedImage(null)
-                            viewModel.clearAttachedDocument()
-                        },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Clear Tool", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    // 2. Attached Document Chip (Removable)
+                    if (uiState.attachedFileName != null) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = SasukeLightViolet.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, SasukeLightViolet.copy(alpha = 0.6f)),
+                            modifier = Modifier.testTag("staging_chip_document")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Description,
+                                    contentDescription = null,
+                                    tint = SasukeLightViolet,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "${uiState.attachedFileName}${if (!uiState.attachedFileSizeFormatted.isNullOrEmpty()) " (${uiState.attachedFileSizeFormatted})" else ""}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1
+                                )
+                                IconButton(
+                                    onClick = { viewModel.removeAttachedDocument() },
+                                    modifier = Modifier.size(24.dp).testTag("remove_document_chip_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Remove document",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Active AI Tool Chip (Removable)
+                    if (uiState.activeTool != ActiveToolType.NONE) {
+                        val toolName = when (uiState.activeTool) {
+                            ActiveToolType.IMAGE_GEN -> AppStrings.get("tool_generate_image", currentLanguage)
+                            ActiveToolType.VIDEO_GEN -> AppStrings.get("tool_generate_video", currentLanguage)
+                            ActiveToolType.WEB_SEARCH -> AppStrings.get("tool_search_web", currentLanguage)
+                            ActiveToolType.MODEL_ARENA -> AppStrings.get("tool_compare_models", currentLanguage)
+                            ActiveToolType.CODING -> AppStrings.get("tool_coding", currentLanguage)
+                            ActiveToolType.STUDY -> AppStrings.get("tool_study", currentLanguage)
+                            ActiveToolType.ADVANCED_RESEARCH, ActiveToolType.REASONING -> AppStrings.get("tool_advanced_research", currentLanguage)
+                            ActiveToolType.VOICE -> AppStrings.get("tool_voice", currentLanguage)
+                            else -> "Tool"
+                        }
+
+                        val toolIcon = when (uiState.activeTool) {
+                            ActiveToolType.IMAGE_GEN -> Icons.Default.AutoAwesome
+                            ActiveToolType.VIDEO_GEN -> Icons.Default.Videocam
+                            ActiveToolType.WEB_SEARCH -> Icons.Default.Public
+                            ActiveToolType.MODEL_ARENA -> Icons.AutoMirrored.Filled.CompareArrows
+                            ActiveToolType.CODING -> Icons.Default.Code
+                            ActiveToolType.STUDY -> Icons.Default.Science
+                            ActiveToolType.ADVANCED_RESEARCH, ActiveToolType.REASONING -> Icons.Default.Psychology
+                            else -> Icons.Default.AutoAwesome
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = SasukeElectricViolet.copy(alpha = 0.2f),
+                            border = BorderStroke(1.dp, SasukeElectricViolet.copy(alpha = 0.7f)),
+                            modifier = Modifier.testTag("staging_chip_tool")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = toolIcon,
+                                    contentDescription = null,
+                                    tint = SasukeNeonCyan,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = toolName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SasukeNeonCyan,
+                                    maxLines = 1
+                                )
+                                IconButton(
+                                    onClick = { viewModel.clearActiveTool() },
+                                    modifier = Modifier.size(24.dp).testTag("remove_tool_chip_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Clear tool",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -625,13 +779,13 @@ fun ChatScreen(
                     onValueChange = { inputText = it },
                     placeholder = {
                         val placeholder = when (uiState.activeTool) {
-                            ActiveToolType.IMAGE_GEN -> "Describe the image to generate..."
-                            ActiveToolType.VIDEO_GEN -> "Describe the video scene for Veo..."
-                            ActiveToolType.MODEL_ARENA -> "Enter prompt to compare Flash vs Pro..."
-                            ActiveToolType.DOCUMENT -> "Ask about the uploaded document..."
-                            ActiveToolType.CODING -> "Describe feature or paste code..."
-                            ActiveToolType.STUDY -> "Enter science concept or ask for quiz..."
-                            else -> AppStrings.get("type_message", currentLanguage)
+                            ActiveToolType.IMAGE_GEN -> AppStrings.get("image_prompt_placeholder", currentLanguage)
+                            ActiveToolType.VIDEO_GEN -> AppStrings.get("video_prompt_placeholder", currentLanguage)
+                            ActiveToolType.MODEL_ARENA -> AppStrings.get("arena_prompt_placeholder", currentLanguage)
+                            ActiveToolType.CODING -> AppStrings.get("coding_placeholder", currentLanguage)
+                            ActiveToolType.STUDY -> AppStrings.get("topic_placeholder", currentLanguage)
+                            ActiveToolType.ADVANCED_RESEARCH, ActiveToolType.REASONING -> "Enter research topic or complex premise..."
+                            else -> if (uiState.attachedFileName != null) "Ask anything about ${uiState.attachedFileName}..." else AppStrings.get("type_message", currentLanguage)
                         }
                         Text(text = placeholder, fontSize = 13.sp)
                     },
@@ -649,20 +803,21 @@ fun ChatScreen(
                 )
 
                 // Send button
+                val canSend = !uiState.isStreaming && (inputText.isNotBlank() || uiState.attachedImageBase64 != null || uiState.attachedFileName != null)
                 IconButton(
                     onClick = {
-                        if (inputText.isNotBlank() || uiState.selectedImageBase64 != null || uiState.attachedFileContent != null) {
+                        if (canSend) {
                             val textToSend = inputText
                             inputText = ""
                             viewModel.sendMessage(textToSend)
                         }
                     },
-                    enabled = !uiState.isStreaming && (inputText.isNotBlank() || uiState.selectedImageBase64 != null || uiState.attachedFileContent != null),
+                    enabled = canSend,
                     modifier = Modifier
                         .size(48.dp)
                         .background(
                             brush = androidx.compose.ui.graphics.Brush.linearGradient(
-                                listOf(SasukeLightViolet, SasukeCobaltBlue)
+                                if (canSend) listOf(SasukeLightViolet, SasukeCobaltBlue) else listOf(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.surfaceVariant)
                             ),
                             shape = CircleShape
                         )
@@ -671,7 +826,7 @@ fun ChatScreen(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
                         contentDescription = "Send",
-                        tint = Color.White,
+                        tint = if (canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -679,28 +834,25 @@ fun ChatScreen(
         }
     }
 
-    // Plus Tools Bottom Sheet
+    // Plus Tools Bottom Sheet (Google Gemini style with top rounded buttons & AI tools)
     if (uiState.isPlusMenuOpen) {
         PlusToolsBottomSheet(
             currentLanguage = currentLanguage,
+            onPickFiles = {
+                documentPickerLauncher.launch(
+                    arrayOf("application/pdf", "text/*", "application/json", "text/plain", "text/csv")
+                )
+            },
+            onLaunchCamera = {
+                cameraLauncher.launch(null)
+            },
+            onPickPhotos = {
+                photoPickerLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
             onSelectTool = { tool ->
-                when (tool) {
-                    ActiveToolType.ADD_IMAGE -> {
-                        photoPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                        viewModel.setPlusMenuOpen(false)
-                    }
-                    ActiveToolType.DOCUMENT -> {
-                        documentPickerLauncher.launch(
-                            arrayOf("text/*", "application/json", "text/plain", "text/csv")
-                        )
-                        viewModel.setPlusMenuOpen(false)
-                    }
-                    else -> {
-                        viewModel.setActiveTool(tool)
-                    }
-                }
+                viewModel.setActiveTool(tool)
             },
             onDismiss = { viewModel.setPlusMenuOpen(false) }
         )

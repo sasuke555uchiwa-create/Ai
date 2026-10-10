@@ -82,6 +82,7 @@ class GeminiApiClient(private val context: Context) {
         modelId: String,
         messages: List<Pair<String, String>>, // role ("user" or "model"), text
         userImageBase64: String? = null,
+        userPdfBase64: String? = null,
         enableSearchGrounding: Boolean = false,
         systemInstruction: String? = null
     ): Flow<GeminiStreamEvent> = flow {
@@ -97,6 +98,7 @@ class GeminiApiClient(private val context: Context) {
         val requestJson = buildGenerateJson(
             messages = messages,
             userImageBase64 = userImageBase64,
+            userPdfBase64 = userPdfBase64,
             enableSearchGrounding = enableSearchGrounding,
             systemInstruction = systemInstruction,
             responseModalities = listOf("TEXT")
@@ -504,6 +506,7 @@ class GeminiApiClient(private val context: Context) {
     private fun buildGenerateJson(
         messages: List<Pair<String, String>>,
         userImageBase64: String?,
+        userPdfBase64: String? = null,
         enableSearchGrounding: Boolean,
         systemInstruction: String?,
         responseModalities: List<String>
@@ -532,14 +535,24 @@ class GeminiApiClient(private val context: Context) {
             textPart.put("text", text)
             partsArray.put(textPart)
 
-            // Attach user image to last user message if present
-            if (index == messages.lastIndex && role == "user" && !userImageBase64.isNullOrEmpty()) {
-                val inlineData = JSONObject()
-                inlineData.put("mimeType", "image/jpeg")
-                inlineData.put("data", userImageBase64)
-                val imgPart = JSONObject()
-                imgPart.put("inlineData", inlineData)
-                partsArray.put(imgPart)
+            // Attach user image and/or PDF to last user message if present
+            if (index == messages.lastIndex && role == "user") {
+                if (!userImageBase64.isNullOrEmpty()) {
+                    val inlineData = JSONObject()
+                    inlineData.put("mimeType", "image/jpeg")
+                    inlineData.put("data", userImageBase64)
+                    val imgPart = JSONObject()
+                    imgPart.put("inlineData", inlineData)
+                    partsArray.put(imgPart)
+                }
+                if (!userPdfBase64.isNullOrEmpty()) {
+                    val inlineData = JSONObject()
+                    inlineData.put("mimeType", "application/pdf")
+                    inlineData.put("data", userPdfBase64)
+                    val pdfPart = JSONObject()
+                    pdfPart.put("inlineData", inlineData)
+                    partsArray.put(pdfPart)
+                }
             }
 
             contentObj.put("parts", partsArray)

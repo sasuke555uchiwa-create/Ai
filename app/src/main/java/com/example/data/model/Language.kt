@@ -114,14 +114,18 @@ object AppStrings {
         // Plus Tools Menu Keys
         "plus_tools_title" to "Sasuke AI Tools",
         "plus_tools_subtitle" to "Select an assistant tool for this conversation",
+        "top_files" to "Files",
+        "top_camera" to "Camera",
+        "top_photos" to "Photos",
+        "ai_tools_header" to "Available AI Tools",
         "tool_generate_image" to "Generate Image",
         "tool_generate_image_desc" to "Synthesize artwork with Gemini 2.5 Flash Image",
         "tool_generate_video" to "Generate Video",
         "tool_generate_video_desc" to "Render video scenes with Google Veo 3.1 Fast",
-        "tool_search_web" to "Search the Web",
+        "tool_search_web" to "Web Search",
         "tool_search_web_desc" to "Live grounding with verifiable citations",
         "tool_upload_doc" to "Upload Document",
-        "tool_upload_doc_desc" to "Analyze text, markdown, CSV, or code files",
+        "tool_upload_doc_desc" to "Analyze PDF, text, CSV, or code files",
         "tool_add_image" to "Add Image",
         "tool_add_image_desc" to "Multimodal vision & visual reasoning",
         "tool_compare_models" to "Compare AI Models",
@@ -134,11 +138,16 @@ object AppStrings {
         "tool_voice_desc" to "Audio/speech conversational response mode",
         "tool_reasoning" to "Deep Reasoning",
         "tool_reasoning_desc" to "Gemini 3.1 Pro analytical reasoning",
+        "tool_advanced_research" to "Advanced Research",
+        "tool_advanced_research_desc" to "Deep multi-step analytical reasoning & investigation",
         "active_tool" to "Active Tool",
         "remove_tool" to "Remove",
         "check_status" to "Check Status",
         "save_to_gallery" to "Save to Gallery",
-        "saved" to "Saved!"
+        "saved" to "Saved!",
+        "chip_photo" to "Photo",
+        "chip_document" to "Document",
+        "chip_pdf" to "PDF Document"
     )
 
     private val french = mapOf(
@@ -232,14 +241,18 @@ object AppStrings {
         // Plus Tools Menu Keys (FR)
         "plus_tools_title" to "Outils Sasuke AI",
         "plus_tools_subtitle" to "Sélectionnez un outil pour cette conversation",
+        "top_files" to "Fichiers",
+        "top_camera" to "Appareil photo",
+        "top_photos" to "Photos",
+        "ai_tools_header" to "Outils IA disponibles",
         "tool_generate_image" to "Générer une image",
         "tool_generate_image_desc" to "Créer une illustration avec Gemini 2.5 Flash Image",
         "tool_generate_video" to "Générer une vidéo",
         "tool_generate_video_desc" to "Créer un clip cinématique avec Veo 3.1 Fast",
-        "tool_search_web" to "Rechercher sur le Web",
+        "tool_search_web" to "Recherche Web",
         "tool_search_web_desc" to "Réponses en temps réel avec sources vérifiées",
         "tool_upload_doc" to "Importer un document",
-        "tool_upload_doc_desc" to "Analyser des fichiers texte, markdown, code ou CSV",
+        "tool_upload_doc_desc" to "Analyser des fichiers PDF, texte, code ou CSV",
         "tool_add_image" to "Ajouter une image",
         "tool_add_image_desc" to "Vision multimodale et questions sur l'image",
         "tool_compare_models" to "Comparer les modèles",
@@ -252,11 +265,16 @@ object AppStrings {
         "tool_voice_desc" to "Réponses conversationnelles avec synthèse vocale",
         "tool_reasoning" to "Raisonnement avancé",
         "tool_reasoning_desc" to "Logique analytique approfondie avec Gemini 3.1 Pro",
+        "tool_advanced_research" to "Recherche avancée",
+        "tool_advanced_research_desc" to "Raisonnement analytique approfondi et investigation",
         "active_tool" to "Outil actif",
         "remove_tool" to "Retirer",
         "check_status" to "Vérifier le statut",
         "save_to_gallery" to "Enregistrer dans la galerie",
-        "saved" to "Enregistré !"
+        "saved" to "Enregistré !",
+        "chip_photo" to "Photo",
+        "chip_document" to "Document",
+        "chip_pdf" to "Document PDF"
     )
 
     private val arabic = mapOf(
@@ -350,6 +368,10 @@ object AppStrings {
         // Plus Tools Menu Keys (AR)
         "plus_tools_title" to "أدوات SASUKE AI",
         "plus_tools_subtitle" to "اختر أداة ذكية لإضافتها للمحادثة",
+        "top_files" to "الملفات",
+        "top_camera" to "الكاميرا",
+        "top_photos" to "الصور",
+        "ai_tools_header" to "أدوات الذكاء الاصطناعي المتاحة",
         "tool_generate_image" to "إنشاء صورة",
         "tool_generate_image_desc" to "توليد صور فنية عبر Gemini 2.5 Flash Image",
         "tool_generate_video" to "إنشاء فيديو",
@@ -357,7 +379,7 @@ object AppStrings {
         "tool_search_web" to "البحث في الويب",
         "tool_search_web_desc" to "إجابات فورية موثقة بمصادر حية من الويب",
         "tool_upload_doc" to "رفع مستند",
-        "tool_upload_doc_desc" to "تحليل ملفات النصوص والأكواد وCSV",
+        "tool_upload_doc_desc" to "تحليل ملفات PDF والنصوص والأكواد وCSV",
         "tool_add_image" to "إضافة صورة",
         "tool_add_image_desc" to "رؤية بصرية متعددة الوسائط والتحليل الذكي",
         "tool_compare_models" to "مقارنة النماذج",
@@ -370,10 +392,15 @@ object AppStrings {
         "tool_voice_desc" to "محادثة صوتية وتوليد الإجابات الصوتية",
         "tool_reasoning" to "التفكير العميق",
         "tool_reasoning_desc" to "تفعيل منطق الاستنتاج العميق عبر Gemini 3.1 Pro",
+        "tool_advanced_research" to "بحث واستنتاج متقدم",
+        "tool_advanced_research_desc" to "استنتاج تحليلي وبحث معمق خطوة بخطوة عبر Gemini 3.1 Pro",
         "active_tool" to "الأداة النشطة",
         "remove_tool" to "إزالة",
         "check_status" to "فحص الحالة",
         "save_to_gallery" to "حفظ في المعرض",
-        "saved" to "تم الحفظ!"
+        "saved" to "تم الحفظ!",
+        "chip_photo" to "صورة",
+        "chip_document" to "مستند",
+        "chip_pdf" to "مستند PDF"
     )
 }

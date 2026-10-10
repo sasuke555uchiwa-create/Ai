@@ -31,16 +31,23 @@ data class ChatUiState(
     val streamingSources: List<WebSource> = emptyList(),
     val selectedModelId: String = AvailableModels.GEMINI_3_5_FLASH.id,
     val isSearchGroundingEnabled: Boolean = false,
-    val selectedImageBase64: String? = null,
     val errorMessage: String? = null,
     val isApiKeyConfigured: Boolean = true,
     // Plus Tools Menu State
     val isPlusMenuOpen: Boolean = false,
     val activeTool: ActiveToolType = ActiveToolType.NONE,
     val activeToolParam: String = "",
+    // Staged Attachments
+    val attachedImageBase64: String? = null,
+    val attachedImageName: String? = null,
     val attachedFileName: String? = null,
-    val attachedFileContent: String? = null
-)
+    val attachedFileContent: String? = null,
+    val attachedPdfBase64: String? = null,
+    val attachedFileSizeFormatted: String? = null,
+    val isPdfFile: Boolean = false
+) {
+    val selectedImageBase64: String? get() = attachedImageBase64
+}
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -95,8 +102,18 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun setSelectedImage(base64: String?) {
-        _uiState.value = _uiState.value.copy(selectedImageBase64 = base64)
+    fun setSelectedImage(base64: String?, name: String? = "photo.jpg") {
+        _uiState.value = _uiState.value.copy(
+            attachedImageBase64 = base64,
+            attachedImageName = if (base64 != null) (name ?: "photo.jpg") else null
+        )
+    }
+
+    fun removeAttachedImage() {
+        _uiState.value = _uiState.value.copy(
+            attachedImageBase64 = null,
+            attachedImageName = null
+        )
     }
 
     fun setPlusMenuOpen(open: Boolean) {
@@ -113,8 +130,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         if (tool == ActiveToolType.WEB_SEARCH) {
             _uiState.value = _uiState.value.copy(isSearchGroundingEnabled = true)
         }
-        // If reasoning tool chosen, set to Pro model
-        if (tool == ActiveToolType.REASONING) {
+        // If reasoning or advanced research chosen, set to Pro model
+        if (tool == ActiveToolType.REASONING || tool == ActiveToolType.ADVANCED_RESEARCH) {
             _uiState.value = _uiState.value.copy(selectedModelId = AvailableModels.GEMINI_3_1_PRO.id)
         }
     }
@@ -127,21 +144,44 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun attachDocument(fileName: String, content: String) {
+    fun attachTextDocument(fileName: String, content: String, sizeFormatted: String = "") {
         _uiState.value = _uiState.value.copy(
-            activeTool = ActiveToolType.DOCUMENT,
             attachedFileName = fileName,
             attachedFileContent = content,
+            attachedPdfBase64 = null,
+            attachedFileSizeFormatted = sizeFormatted,
+            isPdfFile = false,
             isPlusMenuOpen = false
         )
     }
 
-    fun clearAttachedDocument() {
+    fun attachPdfDocument(fileName: String, base64: String, sizeFormatted: String = "") {
+        _uiState.value = _uiState.value.copy(
+            attachedFileName = fileName,
+            attachedFileContent = null,
+            attachedPdfBase64 = base64,
+            attachedFileSizeFormatted = sizeFormatted,
+            isPdfFile = true,
+            isPlusMenuOpen = false
+        )
+    }
+
+    fun attachDocument(fileName: String, content: String) {
+        attachTextDocument(fileName, content)
+    }
+
+    fun removeAttachedDocument() {
         _uiState.value = _uiState.value.copy(
             attachedFileName = null,
             attachedFileContent = null,
-            activeTool = if (_uiState.value.activeTool == ActiveToolType.DOCUMENT) ActiveToolType.NONE else _uiState.value.activeTool
+            attachedPdfBase64 = null,
+            attachedFileSizeFormatted = null,
+            isPdfFile = false
         )
+    }
+
+    fun clearAttachedDocument() {
+        removeAttachedDocument()
     }
 
     fun startNewChat() {
@@ -154,11 +194,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             streamingText = "",
             streamingSources = emptyList(),
             errorMessage = null,
-            selectedImageBase64 = null,
-            activeTool = ActiveToolType.NONE,
-            activeToolParam = "",
+            attachedImageBase64 = null,
+            attachedImageName = null,
             attachedFileName = null,
-            attachedFileContent = null
+            attachedFileContent = null,
+            attachedPdfBase64 = null,
+            attachedFileSizeFormatted = null,
+            isPdfFile = false,
+            activeTool = ActiveToolType.NONE,
+            activeToolParam = ""
         )
         viewModelScope.launch {
             val session = ChatSessionEntity(
@@ -186,23 +230,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 streamingText = "",
                 streamingSources = emptyList(),
                 errorMessage = null,
-                activeTool = ActiveToolType.NONE,
-                activeToolParam = "",
+                attachedImageBase64 = null,
+                attachedImageName = null,
                 attachedFileName = null,
-                attachedFileContent = null
+                attachedFileContent = null,
+                attachedPdfBase64 = null,
+                attachedFileSizeFormatted = null,
+                isPdfFile = false,
+                activeTool = ActiveToolType.NONE,
+                activeToolParam = ""
             )
         }
     }
 
     fun sendMessage(promptText: String) {
         val trimmed = promptText.trim()
-        val imageBase64 = _uiState.value.selectedImageBase64
+        val imageBase64 = _uiState.value.attachedImageBase64
         val attachedFileName = _uiState.value.attachedFileName
         val attachedFileContent = _uiState.value.attachedFileContent
+        val attachedPdfBase64 = _uiState.value.attachedPdfBase64
         val activeTool = _uiState.value.activeTool
         val toolParam = _uiState.value.activeToolParam
 
-        if (trimmed.isEmpty() && imageBase64 == null && attachedFileContent == null) return
+        if (trimmed.isEmpty() && imageBase64 == null && attachedFileContent == null && attachedPdfBase64 == null) return
         if (_uiState.value.isStreaming) return
 
         // 1. Create User Message with appropriate tool tags
@@ -219,19 +269,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         // Clear transient inputs
         _uiState.value = _uiState.value.copy(
             messages = _uiState.value.messages + userMessage,
-            selectedImageBase64 = null,
+            attachedImageBase64 = null,
+            attachedImageName = null,
             attachedFileName = null,
             attachedFileContent = null,
-            errorMessage = null
+            attachedPdfBase64 = null,
+            attachedFileSizeFormatted = null,
+            isPdfFile = false,
+            errorMessage = null,
+            activeTool = ActiveToolType.NONE,
+            activeToolParam = ""
         )
 
         val currentSessionId = _uiState.value.currentSessionId
         persistMessage(userMessage, currentSessionId)
 
-        // Reset active tool for next message
-        _uiState.value = _uiState.value.copy(activeTool = ActiveToolType.NONE, activeToolParam = "")
+        // 2. Prepare combined prompt if text document attached
+        val effectivePrompt = if (!attachedFileContent.isNullOrEmpty()) {
+            "Attached File ($attachedFileName):\n```\n$attachedFileContent\n```\n\nUser Question:\n$trimmed"
+        } else trimmed
 
-        // 2. Route by tool
+        // 3. Route by tool
         when (activeTool) {
             ActiveToolType.IMAGE_GEN -> {
                 executeInChatImageGen(trimmed, toolParam.ifEmpty { "1:1" }, imageBase64, currentSessionId)
@@ -242,31 +300,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             ActiveToolType.MODEL_ARENA -> {
                 executeInChatModelArena(trimmed, currentSessionId)
             }
-            ActiveToolType.DOCUMENT -> {
-                val fullDocPrompt = if (!attachedFileContent.isNullOrEmpty()) {
-                    "Document Content ($attachedFileName):\n\n$attachedFileContent\n\nUser Question:\n$trimmed"
-                } else trimmed
-                executeStandardStreaming(fullDocPrompt, null, false, currentSessionId, "DOCUMENT")
-            }
             ActiveToolType.CODING -> {
-                val codingSys = "You are SASUKE AI Coding Engine. Provide production-grade, syntax-highlighted code with architectural reasoning and edge-case handling."
-                executeStandardStreaming(trimmed, imageBase64, false, currentSessionId, "CODING", codingSys)
+                val codingSys = "You are SASUKE AI Coding Engine. Provide production-grade, syntax-highlighted code with architectural reasoning and edge-case handling in modern languages (Kotlin, Python, TypeScript, etc.)."
+                executeStandardStreaming(effectivePrompt, imageBase64, attachedPdfBase64, false, currentSessionId, "CODING", codingSys)
             }
             ActiveToolType.STUDY -> {
-                val studySys = "You are SASUKE AI Science & STEM Professor. Provide a structured, step-by-step pedagogical scientific breakdown with equations and practice insights."
-                executeStandardStreaming(trimmed, imageBase64, false, currentSessionId, "STUDY", studySys)
+                val studySys = "You are SASUKE AI Science & STEM Professor. Provide a structured, step-by-step pedagogical scientific breakdown with equations, principles, and practice insights."
+                executeStandardStreaming(effectivePrompt, imageBase64, attachedPdfBase64, false, currentSessionId, "STUDY", studySys)
             }
-            ActiveToolType.REASONING -> {
-                val reasoningSys = "You are SASUKE AI Deep Reasoning Core (Gemini 3.1 Pro). Perform multi-step analytical deduction, verify mathematical premises, and explain the thought process."
-                executeStandardStreaming(trimmed, imageBase64, false, currentSessionId, "REASONING", reasoningSys, AvailableModels.GEMINI_3_1_PRO.id)
+            ActiveToolType.REASONING, ActiveToolType.ADVANCED_RESEARCH -> {
+                val reasoningSys = "You are SASUKE AI Advanced Research & Deep Reasoning Core (powered by Gemini 3.1 Pro). Perform multi-step analytical deduction, verify mathematical premises, cross-examine hypotheses, and detail the complete analytical deduction process."
+                executeStandardStreaming(effectivePrompt, imageBase64, attachedPdfBase64, false, currentSessionId, "ADVANCED_RESEARCH", reasoningSys, AvailableModels.GEMINI_3_1_PRO.id)
             }
             ActiveToolType.VOICE -> {
                 val voiceSys = "You are SASUKE AI in Voice Mode. Provide natural, spoken-style, engaging conversational answers suitable for audio playback."
-                executeStandardStreaming(trimmed, imageBase64, false, currentSessionId, "VOICE", voiceSys)
+                executeStandardStreaming(effectivePrompt, imageBase64, attachedPdfBase64, false, currentSessionId, "VOICE", voiceSys)
+            }
+            ActiveToolType.DOCUMENT -> {
+                executeStandardStreaming(effectivePrompt, imageBase64, attachedPdfBase64, false, currentSessionId, "DOCUMENT")
             }
             else -> {
-                val grounding = _uiState.value.isSearchGroundingEnabled
-                executeStandardStreaming(trimmed, imageBase64, grounding, currentSessionId, if (grounding) "WEB_SEARCH" else null)
+                val grounding = _uiState.value.isSearchGroundingEnabled || activeTool == ActiveToolType.WEB_SEARCH
+                executeStandardStreaming(effectivePrompt, imageBase64, attachedPdfBase64, grounding, currentSessionId, if (grounding) "WEB_SEARCH" else null)
             }
         }
     }
@@ -412,6 +467,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun executeStandardStreaming(
         prompt: String,
         userImageBase64: String?,
+        userPdfBase64: String? = null,
         enableGrounding: Boolean,
         sessionId: String,
         toolType: String? = null,
@@ -438,6 +494,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 modelId = modelId,
                 messages = historyPayload,
                 userImageBase64 = userImageBase64,
+                userPdfBase64 = userPdfBase64,
                 enableSearchGrounding = enableGrounding,
                 systemInstruction = systemInstruction
             ).collect { event ->
