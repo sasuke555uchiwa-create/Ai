@@ -2,17 +2,24 @@ package com.example.ui.screens
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.util.Base64
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,16 +44,28 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.CompareArrows
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.PlayCircleOutline
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -59,12 +78,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -80,8 +102,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.example.R
+import com.example.data.model.ActiveToolType
 import com.example.data.model.AppLanguage
 import com.example.data.model.AppStrings
 import com.example.data.model.AvailableModels
@@ -89,7 +111,10 @@ import com.example.data.model.ChatMessage
 import com.example.data.model.MessageRole
 import com.example.data.model.WebSource
 import com.example.ui.components.FormattedAiContent
+import com.example.ui.components.PlusToolsBottomSheet
+import com.example.ui.theme.SasukeAmberWarning
 import com.example.ui.theme.SasukeCobaltBlue
+import com.example.ui.theme.SasukeDarkCardBorder
 import com.example.ui.theme.SasukeElectricViolet
 import com.example.ui.theme.SasukeGreenSuccess
 import com.example.ui.theme.SasukeLightViolet
@@ -114,7 +139,7 @@ fun ChatScreen(
     val scope = rememberCoroutineScope()
     var modelMenuExpanded by remember { mutableStateOf(false) }
 
-    // Android Zero-permission Photo Picker
+    // Photo Picker
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
@@ -123,7 +148,6 @@ fun ChatScreen(
                 try {
                     context.contentResolver.openInputStream(uri)?.use { stream ->
                         val bytes = stream.readBytes()
-                        // Compress bitmap to keep within limits
                         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                         val out = ByteArrayOutputStream()
                         bitmap.compress(Bitmap.CompressFormat.JPEG, 75, out)
@@ -137,7 +161,33 @@ fun ChatScreen(
         }
     }
 
-    // Scroll to bottom when messages change or streaming
+    // Document Picker
+    val documentPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    var displayName = "document.txt"
+                    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameIndex != -1 && cursor.moveToFirst()) {
+                            displayName = cursor.getString(nameIndex) ?: "document.txt"
+                        }
+                    }
+
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val text = stream.bufferedReader().use { it.readText() }
+                        viewModel.attachDocument(displayName, text.take(30000))
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Failed to load document: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    // Auto-scroll on changes
     LaunchedEffect(uiState.messages.size, uiState.streamingText) {
         if (uiState.messages.isNotEmpty() || uiState.streamingText.isNotEmpty()) {
             val totalItems = uiState.messages.size + (if (uiState.isStreaming) 1 else 0)
@@ -153,7 +203,7 @@ fun ChatScreen(
             .background(MaterialTheme.colorScheme.background)
             .testTag("chat_screen")
     ) {
-        // Controls Toolbar: Model selector & Search Grounding toggle
+        // Chat Header Toolbar: Model selector & New Chat action
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -173,6 +223,7 @@ fun ChatScreen(
                         .clip(RoundedCornerShape(20.dp))
                         .clickable { modelMenuExpanded = true }
                         .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .testTag("model_selector_dropdown")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -221,7 +272,7 @@ fun ChatScreen(
                 }
             }
 
-            // Grounding toggle + New Chat
+            // Right header controls: Grounding toggle & New Chat
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -231,7 +282,7 @@ fun ChatScreen(
                     onClick = { viewModel.toggleSearchGrounding() },
                     label = {
                         Text(
-                            text = if (uiState.isSearchGroundingEnabled) "Grounding ON" else "Search Grounding",
+                            text = if (uiState.isSearchGroundingEnabled) "Search ON" else "Search",
                             fontSize = 11.sp
                         )
                     },
@@ -262,7 +313,7 @@ fun ChatScreen(
             }
         }
 
-        // API Key warning if missing
+        // API Key status warning if missing
         if (!uiState.isApiKeyConfigured) {
             Surface(
                 color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.8f),
@@ -301,14 +352,14 @@ fun ChatScreen(
             }
         }
 
-        // Messages List
+        // Messages List Container
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
         ) {
             if (uiState.messages.isEmpty() && !uiState.isStreaming) {
-                // Empty State
+                // Empty State with instant suggestions
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -323,7 +374,7 @@ fun ChatScreen(
                             .size(72.dp)
                             .clip(CircleShape)
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                     Text(
                         text = "SASUKE AI",
                         style = MaterialTheme.typography.headlineSmall,
@@ -331,22 +382,22 @@ fun ChatScreen(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        text = "Ready to assist in English, Français, and العربية.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "Tap '+' to access image, video, search, coding & arena tools directly inside chat.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     )
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // Suggestion Pills
                     val suggestions = listOf(
-                        "Explain quantum tunneling in simple terms",
-                        "Write a thread-safe Singleton in Kotlin",
-                        "Résume les principes de la relativité restreinte",
-                        "اشرح دور الحوسبة الكمية في تشفير البيانات"
+                        "Explain quantum computing in simple steps",
+                        "Generate a cyberpunk anime ninja portrait",
+                        "Write a high-performance LRU Cache in Kotlin",
+                        "قارن بين نماذج الذكاء الاصطناعي في حل الرياضيات"
                     )
                     Column(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth(0.9f)
+                        modifier = Modifier.fillMaxWidth(0.92f)
                     ) {
                         suggestions.forEach { prompt ->
                             Surface(
@@ -355,9 +406,7 @@ fun ChatScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(12.dp))
-                                    .clickable {
-                                        viewModel.sendMessage(prompt)
-                                    }
+                                    .clickable { viewModel.sendMessage(prompt) }
                                     .padding(horizontal = 14.dp, vertical = 10.dp)
                             ) {
                                 Text(
@@ -381,7 +430,16 @@ fun ChatScreen(
                     items(uiState.messages, key = { it.id }) { message ->
                         ChatMessageItem(
                             message = message,
-                            onRegenerate = { viewModel.regenerateLast() }
+                            onRegenerate = { viewModel.regenerateLast() },
+                            onCheckVideoStatus = { opId ->
+                                viewModel.checkVideoStatusInChat(message.id, opId)
+                            },
+                            onRateArena = { isA, star ->
+                                viewModel.rateArenaInChat(message.id, isA, star)
+                            },
+                            onChooseWinner = { winner ->
+                                viewModel.chooseArenaWinnerInChat(message.id, winner)
+                            }
                         )
                     }
 
@@ -432,55 +490,89 @@ fun ChatScreen(
                     }
 
                     item {
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                     }
                 }
             }
         }
 
-        // Preview of attached image
-        if (uiState.selectedImageBase64 != null) {
-            val bitmap = remember(uiState.selectedImageBase64) {
-                try {
-                    val bytes = Base64.decode(uiState.selectedImageBase64, Base64.DEFAULT)
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                } catch (e: Exception) {
-                    null
-                }
-            }
-
-            if (bitmap != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp, vertical = 4.dp)
+        // Active Tool Staging Chip & Attachments Bar above input
+        if (uiState.activeTool != ActiveToolType.NONE || uiState.selectedImageBase64 != null || uiState.attachedFileName != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp)
+                    .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f), RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                    .testTag("active_tool_staging_banner")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Image(
-                            bitmap = bitmap,
-                            contentDescription = "Selected attachment",
-                            modifier = Modifier
-                                .size(50.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Image attached",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.weight(1f))
-                        IconButton(onClick = { viewModel.setSelectedImage(null) }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Remove attachment",
-                                tint = MaterialTheme.colorScheme.onSurface
-                            )
+                        when (uiState.activeTool) {
+                            ActiveToolType.IMAGE_GEN -> {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = SasukeNeonCyan, modifier = Modifier.size(16.dp))
+                                Text("Generate Image (1:1)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeNeonCyan)
+                            }
+                            ActiveToolType.VIDEO_GEN -> {
+                                Icon(Icons.Default.Videocam, contentDescription = null, tint = SasukeAmberWarning, modifier = Modifier.size(16.dp))
+                                Text("Generate Video (Veo 3.1)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeAmberWarning)
+                            }
+                            ActiveToolType.WEB_SEARCH -> {
+                                Icon(Icons.Default.Language, contentDescription = null, tint = SasukeGreenSuccess, modifier = Modifier.size(16.dp))
+                                Text("Live Web Grounding", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeGreenSuccess)
+                            }
+                            ActiveToolType.DOCUMENT -> {
+                                Icon(Icons.Default.Description, contentDescription = null, tint = SasukeNeonCyan, modifier = Modifier.size(16.dp))
+                                Text("Doc: ${uiState.attachedFileName ?: "Attached"}", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeNeonCyan)
+                            }
+                            ActiveToolType.MODEL_ARENA -> {
+                                Icon(Icons.AutoMirrored.Filled.CompareArrows, contentDescription = null, tint = SasukeLightViolet, modifier = Modifier.size(16.dp))
+                                Text("Compare: Flash vs Pro", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeLightViolet)
+                            }
+                            ActiveToolType.CODING -> {
+                                Icon(Icons.Default.Code, contentDescription = null, tint = SasukeNeonCyan, modifier = Modifier.size(16.dp))
+                                Text("Coding Assistant Mode", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeNeonCyan)
+                            }
+                            ActiveToolType.STUDY -> {
+                                Icon(Icons.Default.Science, contentDescription = null, tint = SasukeGreenSuccess, modifier = Modifier.size(16.dp))
+                                Text("Science & STEM Study Mode", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeGreenSuccess)
+                            }
+                            ActiveToolType.VOICE -> {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = SasukeLightViolet, modifier = Modifier.size(16.dp))
+                                Text("Conversational Voice Mode", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeLightViolet)
+                            }
+                            ActiveToolType.REASONING -> {
+                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = SasukeNeonCyan, modifier = Modifier.size(16.dp))
+                                Text("Deep Reasoning (Pro 3.1)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeNeonCyan)
+                            }
+                            else -> {
+                                if (uiState.selectedImageBase64 != null) {
+                                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = SasukeNeonCyan, modifier = Modifier.size(16.dp))
+                                    Text("Image Attached", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SasukeNeonCyan)
+                                }
+                            }
                         }
+                    }
+
+                    // Remove tool button
+                    IconButton(
+                        onClick = {
+                            viewModel.clearActiveTool()
+                            viewModel.setSelectedImage(null)
+                            viewModel.clearAttachedDocument()
+                        },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear Tool", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                     }
                 }
             }
@@ -502,26 +594,28 @@ fun ChatScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Attach image button
+                // Prominent "+" Button opening Plus Tools Bottom Sheet
                 IconButton(
-                    onClick = {
-                        photoPickerLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
+                    onClick = { viewModel.setPlusMenuOpen(true) },
                     modifier = Modifier
                         .size(48.dp)
-                        .testTag("attach_button")
+                        .background(
+                            brush = androidx.compose.ui.graphics.Brush.linearGradient(
+                                listOf(SasukeDarkCardBorder, MaterialTheme.colorScheme.surfaceVariant)
+                            ),
+                            shape = CircleShape
+                        )
+                        .testTag("plus_menu_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.AddPhotoAlternate,
-                        contentDescription = "Attach image",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Sasuke Tools Menu",
+                        tint = SasukeNeonCyan,
+                        modifier = Modifier.size(26.dp)
                     )
                 }
 
@@ -530,10 +624,16 @@ fun ChatScreen(
                     value = inputText,
                     onValueChange = { inputText = it },
                     placeholder = {
-                        Text(
-                            text = AppStrings.get("type_message", currentLanguage),
-                            fontSize = 14.sp
-                        )
+                        val placeholder = when (uiState.activeTool) {
+                            ActiveToolType.IMAGE_GEN -> "Describe the image to generate..."
+                            ActiveToolType.VIDEO_GEN -> "Describe the video scene for Veo..."
+                            ActiveToolType.MODEL_ARENA -> "Enter prompt to compare Flash vs Pro..."
+                            ActiveToolType.DOCUMENT -> "Ask about the uploaded document..."
+                            ActiveToolType.CODING -> "Describe feature or paste code..."
+                            ActiveToolType.STUDY -> "Enter science concept or ask for quiz..."
+                            else -> AppStrings.get("type_message", currentLanguage)
+                        }
+                        Text(text = placeholder, fontSize = 13.sp)
                     },
                     shape = RoundedCornerShape(24.dp),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -551,13 +651,13 @@ fun ChatScreen(
                 // Send button
                 IconButton(
                     onClick = {
-                        if (inputText.isNotBlank() || uiState.selectedImageBase64 != null) {
+                        if (inputText.isNotBlank() || uiState.selectedImageBase64 != null || uiState.attachedFileContent != null) {
                             val textToSend = inputText
                             inputText = ""
                             viewModel.sendMessage(textToSend)
                         }
                     },
-                    enabled = !uiState.isStreaming && (inputText.isNotBlank() || uiState.selectedImageBase64 != null),
+                    enabled = !uiState.isStreaming && (inputText.isNotBlank() || uiState.selectedImageBase64 != null || uiState.attachedFileContent != null),
                     modifier = Modifier
                         .size(48.dp)
                         .background(
@@ -578,20 +678,51 @@ fun ChatScreen(
             }
         }
     }
+
+    // Plus Tools Bottom Sheet
+    if (uiState.isPlusMenuOpen) {
+        PlusToolsBottomSheet(
+            currentLanguage = currentLanguage,
+            onSelectTool = { tool ->
+                when (tool) {
+                    ActiveToolType.ADD_IMAGE -> {
+                        photoPickerLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                        viewModel.setPlusMenuOpen(false)
+                    }
+                    ActiveToolType.DOCUMENT -> {
+                        documentPickerLauncher.launch(
+                            arrayOf("text/*", "application/json", "text/plain", "text/csv")
+                        )
+                        viewModel.setPlusMenuOpen(false)
+                    }
+                    else -> {
+                        viewModel.setActiveTool(tool)
+                    }
+                }
+            },
+            onDismiss = { viewModel.setPlusMenuOpen(false) }
+        )
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatMessageItem(
     message: ChatMessage,
-    onRegenerate: () -> Unit
+    onRegenerate: () -> Unit,
+    onCheckVideoStatus: (String) -> Unit = {},
+    onRateArena: (Boolean, Int) -> Unit = { _, _ -> },
+    onChooseWinner: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
+    var arenaTab by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
     if (message.role == MessageRole.USER) {
-        // User Message (Aligned End)
+        // User Message
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -604,6 +735,41 @@ fun ChatMessageItem(
                 modifier = Modifier.fillMaxWidth(0.85f)
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
+                    // Tool Badge on user message if present
+                    if (!message.toolType.isNullOrEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color.Black.copy(alpha = 0.25f),
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        ) {
+                            Text(
+                                text = "Tool: ${message.toolType}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = SasukeNeonCyan,
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    // Attached Document chip
+                    if (!message.attachedFileName.isNullOrEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Description, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Text(
+                                text = message.attachedFileName,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+
+                    // Attached image
                     if (message.imageBase64 != null) {
                         val bitmap = remember(message.imageBase64) {
                             try {
@@ -635,23 +801,21 @@ fun ChatMessageItem(
             }
         }
     } else {
-        // Assistant Message (Aligned Start)
+        // Assistant Message
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag("assistant_message_${message.id}"),
             horizontalArrangement = Arrangement.Start
         ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(0.96f)
-            ) {
+            Column(modifier = Modifier.fillMaxWidth(0.96f)) {
                 Surface(
                     shape = RoundedCornerShape(4.dp, 18.dp, 18.dp, 18.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
-                        // Header with Sasuke crest badge and model info
+                        // Header
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -687,10 +851,178 @@ fun ChatMessageItem(
                             }
                         }
 
-                        // Formatted markdown content with syntax-highlighted code blocks
-                        FormattedAiContent(text = message.text)
+                        // IN-CHAT WORKFLOW 1: Generated Image
+                        if (!message.generatedImageBase64.isNullOrEmpty()) {
+                            val bitmap = remember(message.generatedImageBase64) {
+                                try {
+                                    val bytes = Base64.decode(message.generatedImageBase64, Base64.DEFAULT)
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                } catch (e: Exception) {
+                                    null
+                                }
+                            }
 
-                        // Grounded Web Sources if present
+                            if (bitmap != null) {
+                                Image(
+                                    bitmap = bitmap,
+                                    contentDescription = "Generated Artwork",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(280.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .border(1.dp, SasukeDarkCardBorder, RoundedCornerShape(12.dp))
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // Image Actions
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Button(
+                                        onClick = {
+                                            saveImageToGallery(context, message.generatedImageBase64)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Save Image", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+
+                        // IN-CHAT WORKFLOW 2: Generated Video Status Card
+                        if (message.toolType == "VIDEO_GEN") {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, SasukeAmberWarning.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                    .padding(10.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(Icons.Default.Videocam, contentDescription = null, tint = SasukeAmberWarning)
+                                        Text(
+                                            text = "Veo 3.1 Video Render Job",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = SasukeAmberWarning
+                                        )
+                                    }
+                                    Text(
+                                        text = message.text,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+
+                                    if (!message.videoOperationId.isNullOrEmpty()) {
+                                        Button(
+                                            onClick = { onCheckVideoStatus(message.videoOperationId) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = SasukeAmberWarning),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.align(Alignment.End)
+                                        ) {
+                                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Text("Check Cloud Status", fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // IN-CHAT WORKFLOW 3: Model Arena Comparison Card
+                        if (message.toolType == "ARENA" && message.comparisonResponseA != null && message.comparisonResponseB != null) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surface,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .border(1.dp, SasukeLightViolet.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                                    .padding(8.dp)
+                            ) {
+                                Column {
+                                    TabRow(
+                                        selectedTabIndex = arenaTab,
+                                        containerColor = Color.Transparent,
+                                        contentColor = SasukeNeonCyan
+                                    ) {
+                                        Tab(
+                                            selected = arenaTab == 0,
+                                            onClick = { arenaTab = 0 },
+                                            text = {
+                                                Text("Model A (${message.latencyA ?: 0}ms)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        )
+                                        Tab(
+                                            selected = arenaTab == 1,
+                                            onClick = { arenaTab = 1 },
+                                            text = {
+                                                Text("Model B (${message.latencyB ?: 0}ms)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    FormattedAiContent(
+                                        text = if (arenaTab == 0) message.comparisonResponseA else message.comparisonResponseB
+                                    )
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    // Ratings & Winner Selection directly on card
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Rate:", style = MaterialTheme.typography.labelSmall, color = SasukeNeonCyan)
+                                        Row {
+                                            val currentRating = if (arenaTab == 0) message.ratingA else message.ratingB
+                                            (1..5).forEach { star ->
+                                                IconButton(
+                                                    onClick = { onRateArena(arenaTab == 0, star) },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (star <= currentRating) Icons.Default.Star else Icons.Outlined.StarBorder,
+                                                        contentDescription = null,
+                                                        tint = if (star <= currentRating) SasukeAmberWarning else Color.Gray,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Button(
+                                                onClick = { onChooseWinner(if (arenaTab == 0) "Model A" else "Model B") },
+                                                colors = ButtonDefaults.buttonColors(
+                                                    containerColor = if (message.winner == (if (arenaTab == 0) "Model A" else "Model B")) SasukeGreenSuccess else SasukeElectricViolet
+                                                ),
+                                                shape = RoundedCornerShape(6.dp),
+                                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(if (message.winner == (if (arenaTab == 0) "Model A" else "Model B")) "Winner!" else "Select Winner", fontSize = 10.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (message.toolType != "VIDEO_GEN" && message.generatedImageBase64.isNullOrEmpty()) {
+                            // Standard Formatted Markdown text
+                            FormattedAiContent(text = message.text)
+                        }
+
+                        // Grounded Web Sources
                         if (message.sources.isNotEmpty()) {
                             Spacer(modifier = Modifier.height(10.dp))
                             Text(
@@ -712,10 +1044,9 @@ fun ChatMessageItem(
                                             .clip(RoundedCornerShape(12.dp))
                                             .clickable {
                                                 try {
-                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(source.url))
-                                                    context.startActivity(intent)
+                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(source.url)))
                                                 } catch (e: Exception) {
-                                                    // No browser found
+                                                    // Browser unavailable
                                                 }
                                             }
                                             .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -823,7 +1154,7 @@ fun AssistantStreamingBubble(
                     modifier = Modifier.size(14.dp)
                 )
                 Text(
-                    text = "Sasuke AI is streaming response...",
+                    text = "Sasuke AI is processing...",
                     style = MaterialTheme.typography.labelSmall,
                     color = SasukeNeonCyan
                 )
@@ -839,5 +1170,31 @@ fun AssistantStreamingBubble(
                 )
             }
         }
+    }
+}
+
+fun saveImageToGallery(context: Context, base64: String) {
+    try {
+        val bytes = Base64.decode(base64, Base64.DEFAULT)
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        val filename = "SasukeAI_${System.currentTimeMillis()}.jpg"
+
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/SasukeAI")
+            }
+        }
+
+        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        if (uri != null) {
+            context.contentResolver.openOutputStream(uri)?.use { stream ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, stream)
+            }
+            Toast.makeText(context, "Image saved to Pictures/SasukeAI", Toast.LENGTH_SHORT).show()
+        }
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to save image: ${e.message}", Toast.LENGTH_SHORT).show()
     }
 }

@@ -7,6 +7,20 @@ enum class MessageRole {
     ASSISTANT
 }
 
+enum class ActiveToolType(val id: String) {
+    NONE("none"),
+    IMAGE_GEN("image_gen"),
+    VIDEO_GEN("video_gen"),
+    WEB_SEARCH("web_search"),
+    DOCUMENT("document"),
+    ADD_IMAGE("add_image"),
+    MODEL_ARENA("model_arena"),
+    CODING("coding"),
+    STUDY("study"),
+    VOICE("voice"),
+    REASONING("reasoning")
+}
+
 data class WebSource(
     val title: String,
     val url: String
@@ -22,7 +36,23 @@ data class ChatMessage(
     val isStreaming: Boolean = false,
     val isError: Boolean = false,
     val latencyMs: Long? = null,
-    val sources: List<WebSource> = emptyList()
+    val sources: List<WebSource> = emptyList(),
+    // In-Chat Tool Extensions
+    val toolType: String? = null,
+    val generatedImageBase64: String? = null,
+    val imageAspectRatio: String? = null,
+    val videoStatus: String? = null,
+    val videoOperationId: String? = null,
+    val attachedFileName: String? = null,
+    val comparisonModelA: String? = null,
+    val comparisonModelB: String? = null,
+    val comparisonResponseA: String? = null,
+    val comparisonResponseB: String? = null,
+    val latencyA: Long? = null,
+    val latencyB: Long? = null,
+    val ratingA: Int = 0,
+    val ratingB: Int = 0,
+    val winner: String? = null
 )
 
 data class ChatSession(

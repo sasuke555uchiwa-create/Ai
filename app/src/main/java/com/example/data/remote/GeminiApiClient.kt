@@ -462,6 +462,45 @@ class GeminiApiClient(private val context: Context) {
         }
     }
 
+    suspend fun checkVideoOperation(operationName: String): GeminiDirectResponse = withContext(Dispatchers.IO) {
+        val apiKey = getEffectiveApiKey()
+        if (apiKey.isEmpty()) {
+            return@withContext GeminiDirectResponse(
+                text = "",
+                isError = true,
+                errorMessage = "API key not configured."
+            )
+        }
+        val cleanOp = if (operationName.startsWith("operations/")) operationName else "operations/$operationName"
+        val url = "$BASE_URL/$cleanOp?key=$apiKey"
+        try {
+            val request = Request.Builder().url(url).get().build()
+            val response = client.newCall(request).execute()
+            val responseString = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                return@withContext GeminiDirectResponse(
+                    text = "",
+                    isError = true,
+                    errorMessage = parseApiErrorMessage(response.code, responseString)
+                )
+            }
+            val root = JSONObject(responseString)
+            val done = root.optBoolean("done", false)
+            if (done) {
+                if (root.has("error")) {
+                    val err = root.getJSONObject("error").optString("message", "Video generation failed")
+                    GeminiDirectResponse(text = "Video generation error: $err", isError = true, errorMessage = err)
+                } else {
+                    GeminiDirectResponse(text = "Veo 3.1 video render completed successfully! Output ready in cloud session.", isError = false)
+                }
+            } else {
+                GeminiDirectResponse(text = "Veo video generation is actively processing in Google Cloud...", isError = false)
+            }
+        } catch (e: Exception) {
+            GeminiDirectResponse(text = "", isError = true, errorMessage = "Error checking operation: ${e.localizedMessage}")
+        }
+    }
+
     private fun buildGenerateJson(
         messages: List<Pair<String, String>>,
         userImageBase64: String?,
