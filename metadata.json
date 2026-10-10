@@ -1,0 +1,6 @@
+{
+  "name": "SASUKE AI",
+  "description": "Mobile-first AI platform with multi-model chat, Model Arena, Image & Video Studio, AI Search, and Coding & Study assistants.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
