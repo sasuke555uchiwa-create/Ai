@@ -21,10 +21,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import android.util.Log
 import com.example.data.model.FirestoreChatMessage
 import com.example.data.model.FirestoreChatSession
 import com.example.data.remote.FirestoreChatRepository
+import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.FirebaseAuth
+import kotlinx.coroutines.Dispatchers
 import java.util.UUID
 
 data class ChatUiState(
@@ -68,6 +71,49 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     init {
         checkApiKey()
         loadOrCreateInitialSession()
+        setupCloudSyncListener()
+    }
+
+    private fun setupCloudSyncListener() {
+        try {
+            if (FirebaseApp.getApps(getApplication()).isNotEmpty()) {
+                val auth = FirebaseAuth.getInstance()
+                auth.addAuthStateListener { firebaseAuth ->
+                    val user = firebaseAuth.currentUser
+                    if (user != null) {
+                        syncCloudHistory()
+                    }
+                }
+                if (auth.currentUser != null) {
+                    syncCloudHistory()
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("ChatViewModel", "Cloud sync setup notice: ${e.message}")
+        }
+    }
+
+    fun syncCloudHistory() {
+        val currentUid = try {
+            FirebaseAuth.getInstance().currentUser?.uid
+        } catch (e: Exception) {
+            null
+        } ?: return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                firestoreRepo.value.syncUserHistoryToRoom(currentUid, dao)
+                // Reload current session messages from Room if active session is empty
+                val currentSessionId = _uiState.value.currentSessionId
+                val entities = dao.getMessagesSnapshot(currentSessionId)
+                if (entities.isNotEmpty() && _uiState.value.messages.isEmpty()) {
+                    val messages = entities.map { AppTypeConverters.parseExtraJson(it) }
+                    _uiState.value = _uiState.value.copy(messages = messages)
+                }
+            } catch (e: Exception) {
+                Log.w("ChatViewModel", "Cloud sync notice: ${e.message}")
+            }
+        }
     }
 
     fun checkApiKey() {

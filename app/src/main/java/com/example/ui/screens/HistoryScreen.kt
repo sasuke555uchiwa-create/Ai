@@ -71,8 +71,9 @@ fun HistoryScreen(
     var sessions by remember { mutableStateOf<List<ChatSessionEntity>>(emptyList()) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
-    // Load sessions
+    // Load sessions and trigger cloud sync
     androidx.compose.runtime.LaunchedEffect(Unit) {
+        chatViewModel.syncCloudHistory()
         dao.getAllSessions().collect { list ->
             sessions = list
         }
@@ -128,7 +129,7 @@ fun HistoryScreen(
         Spacer(modifier = Modifier.height(10.dp))
 
         // Cloud Sync Account Status
-        val authManager = remember { UserAuthManager(chatViewModel.getApplication()) }
+        val authManager = remember { UserAuthManager.getInstance(chatViewModel.getApplication()) }
         UserAuthCard(
             authManager = authManager,
             currentLanguage = currentLanguage

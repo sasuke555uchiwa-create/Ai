@@ -192,7 +192,7 @@ fun UserAuthCard(
                         Button(
                             onClick = {
                                 scope.launch {
-                                    authManager.signInWithGoogle()
+                                    authManager.signInWithGoogle(context)
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),
@@ -260,7 +260,7 @@ fun UserAuthCard(
                             Button(
                                 onClick = {
                                     scope.launch {
-                                        authManager.signInWithGoogle()
+                                        authManager.signInWithGoogle(context)
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),
@@ -296,7 +296,7 @@ fun UserAuthCard(
                             Button(
                                 onClick = {
                                     scope.launch {
-                                        authManager.signInWithGoogle()
+                                        authManager.signInWithGoogle(context)
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),

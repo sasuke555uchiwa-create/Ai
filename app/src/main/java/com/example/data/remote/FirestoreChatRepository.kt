@@ -1,10 +1,17 @@
 package com.example.data.remote
 
 import android.content.Context
+import android.util.Log
 import com.example.R
+import com.example.data.local.AppDao
+import com.example.data.local.AppTypeConverters
+import com.example.data.local.ChatMessageEntity
+import com.example.data.local.ChatSessionEntity
+import com.example.data.model.ChatMessage
 import com.example.data.model.FirestoreChatMessage
 import com.example.data.model.FirestoreChatSession
 import com.example.data.model.FirestoreUserProfile
+import com.example.data.model.MessageRole
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
@@ -139,6 +146,99 @@ class FirestoreChatRepository(private val db: FirebaseFirestore) {
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.DELETE, sessionRef.path)
             throw e
+        }
+    }
+
+    // One-shot fetch user's chat sessions
+    suspend fun getSessions(userId: String): List<FirestoreChatSession> {
+        val colRef = db.collection("users").document(userId).collection("sessions")
+        return try {
+            val snapshot = colRef.orderBy("updatedAt", Query.Direction.DESCENDING).get().await()
+            snapshot.toObjects(FirestoreChatSession::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, colRef.path)
+            emptyList()
+        }
+    }
+
+    // One-shot fetch messages in a session
+    suspend fun getMessages(userId: String, sessionId: String): List<FirestoreChatMessage> {
+        val colRef = db.collection("users").document(userId)
+            .collection("sessions").document(sessionId)
+            .collection("messages")
+        return try {
+            val snapshot = colRef.orderBy("timestamp", Query.Direction.ASCENDING).get().await()
+            snapshot.toObjects(FirestoreChatMessage::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            handleFirestoreError(e, OperationType.GET, colRef.path)
+            emptyList()
+        }
+    }
+
+    // Restore authenticated user's cloud history and merge into Room
+    suspend fun syncUserHistoryToRoom(userId: String, dao: AppDao): Result<Int> {
+        return try {
+            val cloudSessions = getSessions(userId)
+            var totalMessagesSynced = 0
+
+            for (session in cloudSessions) {
+                if (session.id.isBlank()) continue
+
+                val createdAt = session.createdAt?.toDate()?.time
+                    ?: session.updatedAt?.toDate()?.time
+                    ?: System.currentTimeMillis()
+
+                val sessionEntity = ChatSessionEntity(
+                    id = session.id,
+                    title = session.title.ifBlank { "Chat" },
+                    selectedModelId = session.model.ifBlank { "gemini-3.5-flash" },
+                    searchGroundingEnabled = false,
+                    createdAt = createdAt
+                )
+                dao.insertSession(sessionEntity)
+
+                val cloudMessages = getMessages(userId, session.id)
+                for (msg in cloudMessages) {
+                    if (msg.id.isBlank()) continue
+                    val msgTimestamp = msg.timestamp?.toDate()?.time ?: System.currentTimeMillis()
+                    val role = if (msg.sender.equals("user", ignoreCase = true)) MessageRole.USER else MessageRole.ASSISTANT
+
+                    val chatMsg = ChatMessage(
+                        id = msg.id,
+                        role = role,
+                        text = msg.content,
+                        modelId = msg.modelUsed,
+                        timestamp = msgTimestamp,
+                        imageBase64 = if (msg.mediaType?.startsWith("image") == true) msg.mediaUrl else null
+                    )
+
+                    val extraJson = AppTypeConverters.extraToJson(chatMsg)
+                    val msgEntity = ChatMessageEntity(
+                        id = msg.id,
+                        sessionId = msg.sessionId.ifBlank { session.id },
+                        role = role,
+                        text = msg.content,
+                        modelId = msg.modelUsed,
+                        timestamp = msgTimestamp,
+                        imageBase64 = if (msg.mediaType?.startsWith("image") == true) msg.mediaUrl else null,
+                        latencyMs = null,
+                        sourcesJson = "[]",
+                        extraJson = extraJson
+                    )
+                    dao.insertMessage(msgEntity)
+                    totalMessagesSynced++
+                }
+            }
+            Result.success(cloudSessions.size)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.e("FirestoreChatRepo", "Failed to sync user history to Room: ${e.message}", e)
+            Result.failure(e)
         }
     }
 }

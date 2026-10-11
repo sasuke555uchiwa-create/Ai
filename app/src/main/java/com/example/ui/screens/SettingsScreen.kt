@@ -125,7 +125,7 @@ fun SettingsScreen(
 
         // Firebase Auth & Cloud Firestore Account Card
         item {
-            val authManager = remember { UserAuthManager(context) }
+            val authManager = remember { UserAuthManager.getInstance(context) }
             UserAuthCard(
                 authManager = authManager,
                 currentLanguage = currentLanguage
