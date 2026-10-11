@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.StarBorder
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -346,22 +347,31 @@ fun ChatScreen(
                     onClick = { viewModel.toggleSearchGrounding() },
                     label = {
                         Text(
-                            text = if (uiState.isSearchGroundingEnabled) "Search ON" else "Search",
+                            text = when {
+                                uiState.isSearchGroundingEnabled -> "Search ON"
+                                uiState.searchGroundingUnavailable -> "Search (N/A)"
+                                else -> "Search"
+                            },
                             fontSize = 11.sp
                         )
                     },
                     leadingIcon = {
                         Icon(
-                            imageVector = Icons.Default.Language,
+                            imageVector = if (uiState.searchGroundingUnavailable) Icons.Default.Warning else Icons.Default.Language,
                             contentDescription = null,
                             modifier = Modifier.size(16.dp),
-                            tint = if (uiState.isSearchGroundingEnabled) SasukeNeonCyan else MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = when {
+                                uiState.isSearchGroundingEnabled -> SasukeNeonCyan
+                                uiState.searchGroundingUnavailable -> SasukeRedError
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                         )
                     },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                         selectedLabelColor = SasukeNeonCyan
-                    )
+                    ),
+                    modifier = Modifier.testTag("search_grounding_toggle")
                 )
 
                 IconButton(
@@ -375,6 +385,56 @@ fun ChatScreen(
                     )
                 }
             }
+        }
+
+        // Search Grounding Unavailable Alert Dialog
+        if (uiState.showSearchUnavailableDialog) {
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissSearchUnavailableDialog() },
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = SasukeRedError
+                    )
+                },
+                title = {
+                    Text(
+                        text = "Google Search Grounding Unavailable",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Google Search grounding returned HTTP 429 (RESOURCE_EXHAUSTED).",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Grounding with Google Search requires an active billing account and search quota linked to your Google Cloud / AI Studio project.\n\nRegular Gemini chat does not require search quota and continues to work normally.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.dismissSearchUnavailableDialog() },
+                        colors = ButtonDefaults.buttonColors(containerColor = SasukeNeonCyan)
+                    ) {
+                        Text("Use Regular Chat", color = Color.Black)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        viewModel.dismissSearchUnavailableDialog()
+                        onNavigateToSettings()
+                    }) {
+                        Text("API Key Settings")
+                    }
+                }
+            )
         }
 
         // API Key status warning if missing
@@ -523,30 +583,44 @@ fun ChatScreen(
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = MaterialTheme.colorScheme.errorContainer,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth().testTag("chat_error_card")
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Warning,
-                                        contentDescription = null,
-                                        tint = SasukeRedError
-                                    )
-                                    Text(
-                                        text = uiState.errorMessage ?: "Unknown error",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onErrorContainer,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    IconButton(onClick = { viewModel.regenerateLast() }) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
                                         Icon(
-                                            imageVector = Icons.Default.Refresh,
-                                            contentDescription = "Retry",
-                                            tint = SasukeNeonCyan
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = null,
+                                            tint = SasukeRedError
                                         )
+                                        Text(
+                                            text = uiState.errorMessage ?: "Unknown error",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onErrorContainer,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        IconButton(onClick = { viewModel.regenerateLast() }) {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "Retry",
+                                                tint = SasukeNeonCyan
+                                            )
+                                        }
+                                    }
+                                    if (uiState.searchGroundingUnavailable || uiState.errorMessage?.contains("Search", ignoreCase = true) == true) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Button(
+                                            onClick = { viewModel.sendLastWithoutSearch() },
+                                            colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .testTag("chat_continue_regular_button")
+                                        ) {
+                                            Text("Ask without Search (Regular Chat)", fontSize = 12.sp)
+                                        }
                                     }
                                 }
                             }

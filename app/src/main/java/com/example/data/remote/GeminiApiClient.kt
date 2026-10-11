@@ -21,7 +21,21 @@ sealed class GeminiStreamEvent {
     data class Chunk(val text: String) : GeminiStreamEvent()
     data class Sources(val list: List<WebSource>) : GeminiStreamEvent()
     data class Done(val fullText: String, val totalLatencyMs: Long) : GeminiStreamEvent()
-    data class Error(val message: String, val statusCode: Int? = null) : GeminiStreamEvent()
+    data class Error(
+        val message: String,
+        val statusCode: Int? = null,
+        val isGroundingError: Boolean = false
+    ) : GeminiStreamEvent()
+}
+
+sealed class SearchGroundingStatus {
+    object Unknown : SearchGroundingStatus()
+    object Available : SearchGroundingStatus()
+    data class Unavailable(
+        val reason: String,
+        val statusCode: Int? = 429,
+        val details: String = "Google Search grounding requires an active billing account and search quota linked to your Google Cloud / AI Studio project."
+    ) : SearchGroundingStatus()
 }
 
 data class GeminiDirectResponse(
@@ -46,6 +60,97 @@ class GeminiApiClient(private val context: Context) {
         private const val BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
         private const val PREFS_NAME = "sasuke_ai_prefs"
         private const val KEY_CUSTOM_API_KEY = "custom_gemini_api_key"
+
+        @Volatile
+        private var cachedGroundingStatus: SearchGroundingStatus = SearchGroundingStatus.Unknown
+
+        fun getCachedGroundingStatus(): SearchGroundingStatus = cachedGroundingStatus
+
+        fun resetCachedGroundingStatus() {
+            cachedGroundingStatus = SearchGroundingStatus.Unknown
+        }
+
+        fun markCachedGroundingUnavailable(reason: String, statusCode: Int? = 429) {
+            cachedGroundingStatus = SearchGroundingStatus.Unavailable(
+                reason = reason,
+                statusCode = statusCode
+            )
+        }
+    }
+
+    fun getSearchGroundingStatus(): SearchGroundingStatus = cachedGroundingStatus
+
+    fun resetSearchGroundingStatus() {
+        cachedGroundingStatus = SearchGroundingStatus.Unknown
+    }
+
+    fun markSearchGroundingUnavailable(reason: String, statusCode: Int? = 429) {
+        cachedGroundingStatus = SearchGroundingStatus.Unavailable(
+            reason = reason,
+            statusCode = statusCode
+        )
+    }
+
+    /**
+     * Checks if Google Search grounding is supported for the current API key/tier.
+     * Caches the result to avoid repeatedly calling failed endpoints or spamming quota.
+     */
+    suspend fun checkSearchGroundingSupport(forceCheck: Boolean = false): SearchGroundingStatus = withContext(Dispatchers.IO) {
+        if (!forceCheck && cachedGroundingStatus !is SearchGroundingStatus.Unknown) {
+            return@withContext cachedGroundingStatus
+        }
+
+        val apiKey = getEffectiveApiKey()
+        if (apiKey.isEmpty()) {
+            val status = SearchGroundingStatus.Unavailable("Gemini API key is not configured.", 401)
+            cachedGroundingStatus = status
+            return@withContext status
+        }
+
+        try {
+            val requestJson = JSONObject()
+            val contents = JSONArray()
+            val contentObj = JSONObject()
+            contentObj.put("role", "user")
+            val parts = JSONArray()
+            val part = JSONObject()
+            part.put("text", "ping")
+            parts.put(part)
+            contentObj.put("parts", parts)
+            contents.put(contentObj)
+            requestJson.put("contents", contents)
+
+            val tools = JSONArray()
+            val toolObj = JSONObject()
+            toolObj.put("googleSearch", JSONObject())
+            tools.put(toolObj)
+            requestJson.put("tools", tools)
+
+            val url = "$BASE_URL/models/gemini-3.5-flash:generateContent?key=$apiKey"
+            val body = requestJson.toString().toRequestBody("application/json".toMediaType())
+            val request = Request.Builder().url(url).post(body).build()
+
+            val response = client.newCall(request).execute()
+            val responseBody = response.body?.string().orEmpty()
+
+            if (response.isSuccessful) {
+                cachedGroundingStatus = SearchGroundingStatus.Available
+                SearchGroundingStatus.Available
+            } else {
+                val parsedError = parseApiErrorMessage(
+                    code = response.code,
+                    errorBody = responseBody,
+                    requestedSearchGrounding = true
+                )
+                val status = SearchGroundingStatus.Unavailable(parsedError, response.code)
+                cachedGroundingStatus = status
+                status
+            }
+        } catch (e: Exception) {
+            val status = SearchGroundingStatus.Unavailable("Network error verifying Google Search grounding: ${e.localizedMessage}")
+            cachedGroundingStatus = status
+            status
+        }
     }
 
     fun getEffectiveApiKey(): String {
@@ -69,6 +174,7 @@ class GeminiApiClient(private val context: Context) {
     fun saveCustomApiKey(key: String) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putString(KEY_CUSTOM_API_KEY, key.trim()).apply()
+        resetSearchGroundingStatus()
     }
 
     fun isApiKeyConfigured(): Boolean {
@@ -120,8 +226,16 @@ class GeminiApiClient(private val context: Context) {
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
                 val errorBody = response.body?.string().orEmpty()
-                val parsedError = parseApiErrorMessage(response.code, errorBody)
-                emit(GeminiStreamEvent.Error(parsedError, response.code))
+                val isGroundingError = enableSearchGrounding && (response.code == 429 || response.code == 403)
+                val parsedError = parseApiErrorMessage(
+                    code = response.code,
+                    errorBody = errorBody,
+                    requestedSearchGrounding = enableSearchGrounding
+                )
+                if (isGroundingError) {
+                    markSearchGroundingUnavailable(parsedError, response.code)
+                }
+                emit(GeminiStreamEvent.Error(parsedError, response.code, isGroundingError))
                 return@flow
             }
 
@@ -145,23 +259,7 @@ class GeminiApiClient(private val context: Context) {
                         val candidate = candidates.getJSONObject(0)
 
                         // Grounding metadata check
-                        val groundingMetadata = candidate.optJSONObject("groundingMetadata")
-                        if (groundingMetadata != null) {
-                            val chunks = groundingMetadata.optJSONArray("groundingChunks")
-                            if (chunks != null) {
-                                for (i in 0 until chunks.length()) {
-                                    val chunk = chunks.getJSONObject(i)
-                                    val web = chunk.optJSONObject("web")
-                                    if (web != null) {
-                                        val title = web.optString("title", "Web Result")
-                                        val uri = web.optString("uri", "")
-                                        if (uri.isNotEmpty() && collectedSources.none { it.url == uri }) {
-                                            collectedSources.add(WebSource(title = title, url = uri))
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        extractSourcesFromCandidate(candidate, collectedSources)
 
                         val content = candidate.optJSONObject("content")
                         if (content != null) {
@@ -232,11 +330,20 @@ class GeminiApiClient(private val context: Context) {
             val responseString = response.body?.string().orEmpty()
 
             if (!response.isSuccessful) {
+                val isGroundingError = enableSearchGrounding && (response.code == 429 || response.code == 403)
+                val parsedError = parseApiErrorMessage(
+                    code = response.code,
+                    errorBody = responseString,
+                    requestedSearchGrounding = enableSearchGrounding
+                )
+                if (isGroundingError) {
+                    markSearchGroundingUnavailable(parsedError, response.code)
+                }
                 return@withContext GeminiDirectResponse(
                     text = "",
                     latencyMs = latency,
                     isError = true,
-                    errorMessage = parseApiErrorMessage(response.code, responseString)
+                    errorMessage = parsedError
                 )
             }
 
@@ -247,19 +354,7 @@ class GeminiApiClient(private val context: Context) {
             val sources = mutableListOf<WebSource>()
 
             if (candidate != null) {
-                val grounding = candidate.optJSONObject("groundingMetadata")
-                val chunks = grounding?.optJSONArray("groundingChunks")
-                if (chunks != null) {
-                    for (i in 0 until chunks.length()) {
-                        val chunk = chunks.getJSONObject(i)
-                        val web = chunk.optJSONObject("web")
-                        if (web != null) {
-                            val uri = web.optString("uri", "")
-                            val title = web.optString("title", "Web Result")
-                            if (uri.isNotEmpty()) sources.add(WebSource(title, uri))
-                        }
-                    }
-                }
+                extractSourcesFromCandidate(candidate, sources)
 
                 val content = candidate.optJSONObject("content")
                 val parts = content?.optJSONArray("parts")
@@ -580,7 +675,34 @@ class GeminiApiClient(private val context: Context) {
         return root
     }
 
-    private fun parseApiErrorMessage(code: Int, errorBody: String): String {
+    private fun extractSourcesFromCandidate(candidate: JSONObject, intoList: MutableList<WebSource>) {
+        val groundingMetadata = candidate.optJSONObject("groundingMetadata") ?: return
+        val chunks = groundingMetadata.optJSONArray("groundingChunks") ?: return
+        for (i in 0 until chunks.length()) {
+            val chunk = chunks.optJSONObject(i) ?: continue
+            val web = chunk.optJSONObject("web") ?: continue
+            val uri = web.optString("uri", web.optString("url", "")).trim()
+            if (uri.isEmpty()) continue
+            var title = web.optString("title", "").trim()
+            if (title.isEmpty()) {
+                title = try {
+                    val host = java.net.URI(uri).host
+                    host?.removePrefix("www.") ?: "Web Result"
+                } catch (e: Exception) {
+                    "Web Result"
+                }
+            }
+            if (intoList.none { it.url == uri }) {
+                intoList.add(WebSource(title = title.ifEmpty { "Web Result" }, url = uri))
+            }
+        }
+    }
+
+    private fun parseApiErrorMessage(
+        code: Int,
+        errorBody: String,
+        requestedSearchGrounding: Boolean = false
+    ): String {
         return try {
             val root = JSONObject(errorBody)
             val error = root.optJSONObject("error")
@@ -592,6 +714,8 @@ class GeminiApiClient(private val context: Context) {
                     "API key is invalid. Please verify your GEMINI_API_KEY in the AI Studio Secrets panel."
                 code == 403 ->
                     "Access Forbidden (403): The selected model or feature may not be enabled for your project or region ($message)."
+                code == 429 && requestedSearchGrounding ->
+                    "Google Search Grounding Quota Exhausted (HTTP 429 RESOURCE_EXHAUSTED). Grounding with Google Search requires an active billing account and search quota linked to your Google Cloud / AI Studio project. Regular Gemini chat without search is available."
                 code == 429 ->
                     "Rate limit or quota exceeded (429). Please wait a moment before sending another request."
                 code == 404 ->
@@ -600,10 +724,11 @@ class GeminiApiClient(private val context: Context) {
                 else -> message
             }
         } catch (e: Exception) {
-            when (code) {
-                401 -> "Unauthorized: GEMINI_API_KEY is missing or invalid."
-                403 -> "Forbidden: Quota, permissions, or API restrictions apply."
-                429 -> "Rate limit reached (429). Please slow down requests."
+            when {
+                code == 401 -> "Unauthorized: GEMINI_API_KEY is missing or invalid."
+                code == 403 -> "Forbidden: Quota, permissions, or API restrictions apply."
+                code == 429 && requestedSearchGrounding -> "Google Search Grounding Quota Exhausted (HTTP 429). Search requires a billing-enabled project. Regular chat without search remains operational."
+                code == 429 -> "Rate limit reached (429). Please slow down requests."
                 else -> "HTTP $code: $errorBody"
             }
         }

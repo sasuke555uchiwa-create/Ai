@@ -14,6 +14,7 @@ import com.example.data.model.MessageRole
 import com.example.data.model.WebSource
 import com.example.data.remote.GeminiApiClient
 import com.example.data.remote.GeminiStreamEvent
+import com.example.data.remote.SearchGroundingStatus
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +39,9 @@ data class ChatUiState(
     val streamingSources: List<WebSource> = emptyList(),
     val selectedModelId: String = AvailableModels.GEMINI_3_5_FLASH.id,
     val isSearchGroundingEnabled: Boolean = false,
+    val searchGroundingUnavailable: Boolean = false,
+    val searchGroundingExplanation: String? = null,
+    val showSearchUnavailableDialog: Boolean = false,
     val errorMessage: String? = null,
     val isApiKeyConfigured: Boolean = true,
     // Plus Tools Menu State
@@ -70,6 +74,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         checkApiKey()
+        checkGroundingStatus()
         loadOrCreateInitialSession()
         setupCloudSyncListener()
     }
@@ -119,6 +124,28 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     fun checkApiKey() {
         val configured = apiClient.isApiKeyConfigured()
         _uiState.value = _uiState.value.copy(isApiKeyConfigured = configured)
+        if (configured) {
+            checkGroundingStatus()
+        }
+    }
+
+    fun checkGroundingStatus() {
+        if (!apiClient.isApiKeyConfigured()) return
+        viewModelScope.launch {
+            val status = apiClient.checkSearchGroundingSupport()
+            if (status is SearchGroundingStatus.Unavailable) {
+                _uiState.value = _uiState.value.copy(
+                    isSearchGroundingEnabled = false,
+                    searchGroundingUnavailable = true,
+                    searchGroundingExplanation = status.reason
+                )
+            } else if (status is SearchGroundingStatus.Available) {
+                _uiState.value = _uiState.value.copy(
+                    searchGroundingUnavailable = false,
+                    searchGroundingExplanation = null
+                )
+            }
+        }
     }
 
     private fun loadOrCreateInitialSession() {
@@ -148,9 +175,46 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleSearchGrounding() {
-        _uiState.value = _uiState.value.copy(
-            isSearchGroundingEnabled = !_uiState.value.isSearchGroundingEnabled
-        )
+        if (_uiState.value.isSearchGroundingEnabled) {
+            // Turning OFF
+            _uiState.value = _uiState.value.copy(isSearchGroundingEnabled = false)
+            return
+        }
+
+        // Turning ON: Check availability first
+        val currentStatus = apiClient.getSearchGroundingStatus()
+        if (currentStatus is SearchGroundingStatus.Unavailable) {
+            // Keep the Search toggle honest: never display Search as enabled and working when unavailable!
+            _uiState.value = _uiState.value.copy(
+                isSearchGroundingEnabled = false,
+                searchGroundingUnavailable = true,
+                searchGroundingExplanation = currentStatus.reason,
+                showSearchUnavailableDialog = true
+            )
+            return
+        }
+
+        viewModelScope.launch {
+            val status = apiClient.checkSearchGroundingSupport()
+            if (status is SearchGroundingStatus.Unavailable) {
+                _uiState.value = _uiState.value.copy(
+                    isSearchGroundingEnabled = false,
+                    searchGroundingUnavailable = true,
+                    searchGroundingExplanation = status.reason,
+                    showSearchUnavailableDialog = true
+                )
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    isSearchGroundingEnabled = true,
+                    searchGroundingUnavailable = false,
+                    searchGroundingExplanation = null
+                )
+            }
+        }
+    }
+
+    fun dismissSearchUnavailableDialog() {
+        _uiState.value = _uiState.value.copy(showSearchUnavailableDialog = false)
     }
 
     fun setSelectedImage(base64: String?, name: String? = "photo.jpg") {
@@ -177,9 +241,33 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             activeToolParam = param,
             isPlusMenuOpen = false
         )
-        // If web search tool chosen, toggle grounding
+        // If web search tool chosen, check grounding status honestly
         if (tool == ActiveToolType.WEB_SEARCH) {
-            _uiState.value = _uiState.value.copy(isSearchGroundingEnabled = true)
+            val currentStatus = apiClient.getSearchGroundingStatus()
+            if (currentStatus is SearchGroundingStatus.Unavailable) {
+                _uiState.value = _uiState.value.copy(
+                    activeTool = ActiveToolType.NONE,
+                    isSearchGroundingEnabled = false,
+                    searchGroundingUnavailable = true,
+                    searchGroundingExplanation = currentStatus.reason,
+                    showSearchUnavailableDialog = true
+                )
+            } else {
+                viewModelScope.launch {
+                    val status = apiClient.checkSearchGroundingSupport()
+                    if (status is SearchGroundingStatus.Unavailable) {
+                        _uiState.value = _uiState.value.copy(
+                            activeTool = ActiveToolType.NONE,
+                            isSearchGroundingEnabled = false,
+                            searchGroundingUnavailable = true,
+                            searchGroundingExplanation = status.reason,
+                            showSearchUnavailableDialog = true
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(isSearchGroundingEnabled = true)
+                    }
+                }
+            }
         }
         // If reasoning or advanced research chosen, set to Pro model
         if (tool == ActiveToolType.REASONING || tool == ActiveToolType.ADVANCED_RESEARCH) {
@@ -371,8 +459,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 executeStandardStreaming(effectivePrompt, imageBase64, attachedPdfBase64, false, currentSessionId, "DOCUMENT")
             }
             else -> {
-                val grounding = _uiState.value.isSearchGroundingEnabled || activeTool == ActiveToolType.WEB_SEARCH
-                executeStandardStreaming(effectivePrompt, imageBase64, attachedPdfBase64, grounding, currentSessionId, if (grounding) "WEB_SEARCH" else null)
+                val groundingRequested = _uiState.value.isSearchGroundingEnabled || activeTool == ActiveToolType.WEB_SEARCH
+                val currentStatus = apiClient.getSearchGroundingStatus()
+                val isUnavailable = currentStatus is SearchGroundingStatus.Unavailable || _uiState.value.searchGroundingUnavailable
+
+                if (groundingRequested && isUnavailable) {
+                    val reason = (currentStatus as? SearchGroundingStatus.Unavailable)?.reason
+                        ?: _uiState.value.searchGroundingExplanation
+                        ?: "Google Search Grounding Quota Exhausted (HTTP 429). Regular chat without search is active."
+                    _uiState.value = _uiState.value.copy(
+                        isSearchGroundingEnabled = false,
+                        activeTool = if (activeTool == ActiveToolType.WEB_SEARCH) ActiveToolType.NONE else activeTool,
+                        searchGroundingUnavailable = true,
+                        searchGroundingExplanation = reason
+                    )
+                    executeStandardStreaming(effectivePrompt, imageBase64, attachedPdfBase64, false, currentSessionId, null)
+                } else {
+                    val grounding = groundingRequested && !isUnavailable
+                    executeStandardStreaming(effectivePrompt, imageBase64, attachedPdfBase64, grounding, currentSessionId, if (grounding) "WEB_SEARCH" else null)
+                }
             }
         }
     }
@@ -580,10 +685,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         persistMessage(assistantMessage, sessionId)
                     }
                     is GeminiStreamEvent.Error -> {
-                        _uiState.value = _uiState.value.copy(
-                            isStreaming = false,
-                            errorMessage = event.message
-                        )
+                        if (event.isGroundingError) {
+                            // Turn search grounding OFF immediately to keep toggle honest
+                            _uiState.value = _uiState.value.copy(
+                                isStreaming = false,
+                                isSearchGroundingEnabled = false,
+                                searchGroundingUnavailable = true,
+                                searchGroundingExplanation = event.message,
+                                errorMessage = event.message,
+                                activeTool = if (_uiState.value.activeTool == ActiveToolType.WEB_SEARCH) ActiveToolType.NONE else _uiState.value.activeTool
+                            )
+                        } else {
+                            _uiState.value = _uiState.value.copy(
+                                isStreaming = false,
+                                errorMessage = event.message
+                            )
+                        }
                     }
                 }
             }
@@ -661,7 +778,37 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val trimmedList = _uiState.value.messages.dropLast(1)
             _uiState.value = _uiState.value.copy(messages = trimmedList)
         }
+        _uiState.value = _uiState.value.copy(errorMessage = null)
+        // If search was the cause of failure, do not repeatedly retry failed grounding! Turn it off.
+        if (_uiState.value.searchGroundingUnavailable) {
+            _uiState.value = _uiState.value.copy(
+                isSearchGroundingEnabled = false,
+                activeTool = if (_uiState.value.activeTool == ActiveToolType.WEB_SEARCH) ActiveToolType.NONE else _uiState.value.activeTool
+            )
+        }
         sendMessage(lastUserMessage.text)
+    }
+
+    fun sendLastWithoutSearch() {
+        val lastUserMessage = _uiState.value.messages.lastOrNull { it.role == MessageRole.USER } ?: return
+        if (_uiState.value.messages.lastOrNull()?.role == MessageRole.ASSISTANT && _uiState.value.messages.lastOrNull()?.isError == true) {
+            val trimmedList = _uiState.value.messages.dropLast(1)
+            _uiState.value = _uiState.value.copy(messages = trimmedList)
+        }
+        _uiState.value = _uiState.value.copy(
+            isSearchGroundingEnabled = false,
+            errorMessage = null,
+            activeTool = if (_uiState.value.activeTool == ActiveToolType.WEB_SEARCH) ActiveToolType.NONE else _uiState.value.activeTool
+        )
+        val currentSessionId = _uiState.value.currentSessionId
+        executeStandardStreaming(
+            prompt = lastUserMessage.text,
+            userImageBase64 = null,
+            userPdfBase64 = null,
+            enableGrounding = false,
+            sessionId = currentSessionId,
+            toolType = null
+        )
     }
 
     fun deleteCurrentSession() {

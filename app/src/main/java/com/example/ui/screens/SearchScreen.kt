@@ -76,6 +76,7 @@ fun SearchScreen(
     var sourcesList by remember { mutableStateOf<List<WebSource>>(emptyList()) }
     var latencyMs by remember { mutableStateOf(0L) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var isUngroundedFallback by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = Modifier
@@ -185,19 +186,80 @@ fun SearchScreen(
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.errorContainer,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().testTag("search_error_card")
                 ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = SasukeRedError)
-                        Text(
-                            text = errorMessage ?: "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onErrorContainer
-                        )
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = SasukeRedError)
+                            Text(
+                                text = errorMessage ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Button(
+                                onClick = {
+                                    if (queryText.isNotBlank()) {
+                                        isSearching = true
+                                        errorMessage = null
+                                        isUngroundedFallback = true
+                                        sourcesList = emptyList()
+                                        scope.launch {
+                                            val response = apiClient.generateContent(
+                                                modelId = AvailableModels.GEMINI_3_5_FLASH.id,
+                                                prompt = queryText,
+                                                enableSearchGrounding = false,
+                                                systemInstruction = "You are SASUKE AI. Provide a clear, structured, objective answer to the user query."
+                                            )
+                                            isSearching = false
+                                            if (response.isError) {
+                                                errorMessage = response.errorMessage
+                                            } else {
+                                                searchResultText = response.text
+                                                latencyMs = response.latencyMs
+                                            }
+                                        }
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),
+                                modifier = Modifier.weight(1f).testTag("search_ask_standard_button")
+                            ) {
+                                Text("Ask Standard AI", fontSize = 11.sp)
+                            }
+
+                            Button(
+                                onClick = {
+                                    try {
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(queryText)))
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        // Browser not available
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                                modifier = Modifier.weight(1f).testTag("search_google_browser_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Google Search", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -275,18 +337,28 @@ fun SearchScreen(
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "Grounded Synthesis",
+                                text = if (isUngroundedFallback) "Standard AI Synthesis (No Web Search)" else "Grounded Synthesis",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = if (isUngroundedFallback) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary
                             )
                             Text(
                                 text = "${latencyMs}ms",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (isUngroundedFallback) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Notice: Google Search grounding was unavailable due to API project quota limits (HTTP 429). This response was generated by Gemini 3.5 Flash without live web browsing.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
