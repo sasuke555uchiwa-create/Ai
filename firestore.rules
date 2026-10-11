@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile(data) {
+      return data.uid is string &&
+             data.uid == request.auth.uid &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 200)) &&
+             (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 100)) &&
+             (!('photoUrl' in data) || data.photoUrl == null || (data.photoUrl is string && data.photoUrl.size() <= 1000)) &&
+             (!('updatedAt' in data) || (data.updatedAt is timestamp && data.updatedAt <= request.time));
+    }
+
+    function isValidChatSession(data, userId) {
+      return data.id is string &&
+             data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.title is string &&
+             data.title.size() >= 1 &&
+             data.title.size() <= 200 &&
+             (!('model' in data) || (data.model is string && data.model.size() <= 100)) &&
+             data.createdAt is timestamp &&
+             data.createdAt <= request.time &&
+             data.updatedAt is timestamp &&
+             data.updatedAt <= request.time;
+    }
+
+    function isValidChatMessage(data, userId) {
+      return data.id is string &&
+             data.sessionId is string &&
+             data.userId is string &&
+             data.userId == userId &&
+             data.userId == request.auth.uid &&
+             data.sender is string &&
+             (data.sender == 'user' || data.sender == 'model' || data.sender == 'assistant' || data.sender == 'system') &&
+             data.content is string &&
+             data.content.size() <= 50000 &&
+             (!('modelUsed' in data) || data.modelUsed == null || (data.modelUsed is string && data.modelUsed.size() <= 100)) &&
+             (!('mediaType' in data) || data.mediaType == null || (data.mediaType is string && data.mediaType.size() <= 50)) &&
+             (!('mediaUrl' in data) || data.mediaUrl == null || (data.mediaUrl is string && data.mediaUrl.size() <= 5000)) &&
+             data.timestamp is timestamp &&
+             data.timestamp <= request.time;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow delete: if isOwner(userId);
+
+      match /sessions/{sessionId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidChatSession(request.resource.data, userId);
+        allow delete: if isOwner(userId);
+
+        match /messages/{messageId} {
+          allow read: if isOwner(userId);
+          allow create, update: if isOwner(userId) && isValidChatMessage(request.resource.data, userId);
+          allow delete: if isOwner(userId);
+        }
+      }
+    }
+
+    // Default deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

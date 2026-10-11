@@ -46,6 +46,8 @@ import com.example.data.local.AppDatabase
 import com.example.data.local.ChatSessionEntity
 import com.example.data.model.AppLanguage
 import com.example.data.model.AppStrings
+import com.example.data.auth.UserAuthManager
+import com.example.ui.components.UserAuthCard
 import com.example.ui.components.AppScreen
 import com.example.ui.theme.SasukeDarkCardBorder
 import com.example.ui.theme.SasukeNeonCyan
@@ -122,6 +124,15 @@ fun HistoryScreen(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Cloud Sync Account Status
+        val authManager = remember { UserAuthManager(chatViewModel.getApplication()) }
+        UserAuthCard(
+            authManager = authManager,
+            currentLanguage = currentLanguage
+        )
 
         Spacer(modifier = Modifier.height(14.dp))
 

@@ -21,6 +21,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import com.example.data.model.FirestoreChatMessage
+import com.example.data.model.FirestoreChatSession
+import com.example.data.remote.FirestoreChatRepository
+import com.google.firebase.auth.FirebaseAuth
 import java.util.UUID
 
 data class ChatUiState(
@@ -54,6 +58,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val db = AppDatabase.getInstance(application)
     private val dao = db.appDao()
     val apiClient = GeminiApiClient(application)
+    private val firestoreRepo = lazy { FirestoreChatRepository(application) }
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
@@ -570,6 +575,37 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 )
             }
+
+            // Dual persistence: sync to Cloud Firestore when user is authenticated
+            try {
+                val currentUid = FirebaseAuth.getInstance().currentUser?.uid
+                if (currentUid != null) {
+                    val sessionTitle = if (msg.text.length > 28) msg.text.take(28) + "..." else "Chat"
+                    firestoreRepo.value.saveSession(
+                        userId = currentUid,
+                        session = FirestoreChatSession(
+                            id = sessionId,
+                            userId = currentUid,
+                            title = sessionTitle,
+                            model = _uiState.value.selectedModelId
+                        )
+                    )
+                    firestoreRepo.value.saveMessage(
+                        userId = currentUid,
+                        sessionId = sessionId,
+                        message = FirestoreChatMessage(
+                            id = msg.id,
+                            sessionId = sessionId,
+                            userId = currentUid,
+                            sender = if (msg.role == MessageRole.USER) "user" else "model",
+                            content = msg.text,
+                            modelUsed = msg.modelId
+                        )
+                    )
+                }
+            } catch (e: Exception) {
+                // Silently ignore if offline or unauthenticated
+            }
         }
     }
 
@@ -587,6 +623,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             dao.deleteMessagesForSession(sessionId)
             dao.deleteSession(sessionId)
+            try {
+                val currentUid = FirebaseAuth.getInstance().currentUser?.uid
+                if (currentUid != null) {
+                    firestoreRepo.value.deleteSession(currentUid, sessionId)
+                }
+            } catch (e: Exception) {
+                // Non-fatal if offline
+            }
             startNewChat()
         }
     }

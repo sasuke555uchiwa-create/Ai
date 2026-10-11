@@ -57,6 +57,8 @@ import com.example.data.local.UserPreferences
 import com.example.data.model.AppLanguage
 import com.example.data.model.AppStrings
 import com.example.data.remote.GeminiApiClient
+import com.example.data.auth.UserAuthManager
+import com.example.ui.components.UserAuthCard
 import com.example.ui.theme.SasukeCobaltBlue
 import com.example.ui.theme.SasukeElectricViolet
 import com.example.ui.theme.SasukeGreenSuccess
@@ -119,6 +121,15 @@ fun SettingsScreen(
                     }
                 }
             }
+        }
+
+        // Firebase Auth & Cloud Firestore Account Card
+        item {
+            val authManager = remember { UserAuthManager(context) }
+            UserAuthCard(
+                authManager = authManager,
+                currentLanguage = currentLanguage
+            )
         }
 
         // Appearance & Theme Card
