@@ -59,4 +59,14 @@ interface AppDao {
 
     @Query("DELETE FROM saved_images WHERE id = :id")
     suspend fun deleteSavedImage(id: String)
+
+    // Search Queries
+    @Query("SELECT * FROM chat_sessions WHERE title LIKE '%' || :query || '%' ORDER BY createdAt DESC")
+    fun searchSessions(query: String): Flow<List<ChatSessionEntity>>
+
+    @Query("SELECT * FROM chat_messages WHERE text LIKE '%' || :query || '%' ORDER BY timestamp DESC")
+    fun searchMessages(query: String): Flow<List<ChatMessageEntity>>
+
+    @Query("SELECT * FROM chat_messages WHERE text LIKE '%' || :query || '%' ORDER BY timestamp DESC")
+    suspend fun searchMessagesSnapshot(query: String): List<ChatMessageEntity>
 }

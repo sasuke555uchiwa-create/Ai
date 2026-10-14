@@ -127,6 +127,9 @@ import com.example.ui.theme.SasukeElectricViolet
 import com.example.ui.theme.SasukeGreenSuccess
 import com.example.ui.theme.SasukeLightViolet
 import com.example.ui.theme.SasukeNeonCyan
+import androidx.compose.material.icons.filled.Key
+import com.example.data.local.UserPreferences
+import com.example.ui.components.ApiKeySetupDialog
 import com.example.ui.theme.SasukeRedError
 import com.example.ui.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
@@ -146,6 +149,20 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var modelMenuExpanded by remember { mutableStateOf(false) }
+    var showKeySetupDialog by remember { mutableStateOf(false) }
+
+    if (showKeySetupDialog) {
+        val prefs = remember { UserPreferences(context) }
+        ApiKeySetupDialog(
+            chatViewModel = viewModel,
+            userPreferences = prefs,
+            onDismiss = { showKeySetupDialog = false },
+            onSaved = {
+                showKeySetupDialog = false
+                viewModel.checkGroundingStatus()
+            }
+        )
+    }
 
     // Camera Capture Launcher (TakePicturePreview)
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -420,18 +437,29 @@ fun ChatScreen(
                 },
                 confirmButton = {
                     Button(
-                        onClick = { viewModel.dismissSearchUnavailableDialog() },
-                        colors = ButtonDefaults.buttonColors(containerColor = SasukeNeonCyan)
+                        onClick = {
+                            viewModel.dismissSearchUnavailableDialog()
+                            showKeySetupDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = SasukeNeonCyan),
+                        modifier = Modifier.testTag("dialog_open_search_key_setup")
                     ) {
-                        Text("Use Regular Chat", color = Color.Black)
+                        Icon(imageVector = Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Black)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Add Search Key (1 Tap)", color = Color.Black, fontWeight = FontWeight.Bold)
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = {
-                        viewModel.dismissSearchUnavailableDialog()
-                        onNavigateToSettings()
-                    }) {
-                        Text("Configure in Settings")
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { viewModel.dismissSearchUnavailableDialog() }) {
+                            Text("Regular Chat")
+                        }
+                        TextButton(onClick = {
+                            viewModel.dismissSearchUnavailableDialog()
+                            onNavigateToSettings()
+                        }) {
+                            Text("Settings")
+                        }
                     }
                 }
             )
@@ -609,17 +637,40 @@ fun ChatScreen(
                                             )
                                         }
                                     }
-                                    if (uiState.searchGroundingUnavailable || uiState.errorMessage?.contains("Search", ignoreCase = true) == true) {
+                                     if (uiState.searchGroundingUnavailable || uiState.errorMessage?.contains("Search", ignoreCase = true) == true) {
                                         Spacer(modifier = Modifier.height(8.dp))
-                                        Button(
-                                            onClick = { viewModel.sendLastWithoutSearch() },
-                                            colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),
-                                            shape = RoundedCornerShape(8.dp),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .testTag("chat_continue_regular_button")
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            Text("Ask without Search (Regular Chat)", fontSize = 12.sp)
+                                            Button(
+                                                onClick = { showKeySetupDialog = true },
+                                                colors = ButtonDefaults.buttonColors(containerColor = SasukeNeonCyan),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .testTag("chat_fix_key_button")
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Key,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.size(14.dp),
+                                                    tint = Color.Black
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text("Add Key", fontSize = 11.sp, color = Color.Black, fontWeight = FontWeight.Bold)
+                                            }
+
+                                            Button(
+                                                onClick = { viewModel.sendLastWithoutSearch() },
+                                                colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .testTag("chat_continue_regular_button")
+                                            ) {
+                                                Text("Ask Regular", fontSize = 11.sp)
+                                            }
                                         }
                                     }
                                 }

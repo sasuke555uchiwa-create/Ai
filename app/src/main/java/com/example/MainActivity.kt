@@ -148,7 +148,8 @@ fun SasukeAiApp(
                         AppScreen.AI_SEARCH -> {
                             SearchScreen(
                                 apiClient = chatViewModel.apiClient,
-                                currentLanguage = currentLanguage
+                                currentLanguage = currentLanguage,
+                                chatViewModel = chatViewModel
                             )
                         }
                         AppScreen.CODING -> {

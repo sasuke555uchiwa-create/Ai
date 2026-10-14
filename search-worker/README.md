@@ -1,12 +1,22 @@
-# SASUKE AI — Cloudflare Worker Search Backend (Tavily Proxy)
+# SASUKE AI — Web Search Backend & Easy Key Configuration
 
-This Cloudflare Worker provides a secure, rate-limited proxy to the [Tavily Search API](https://tavily.com) for the SASUKE AI Android app. It replaces Gemini's native Google Search grounding (which requires paid Gemini billing) with Tavily's free search tier (1,000 free searches/month).
+SASUKE AI offers two streamlined ways to add and use live web search with Tavily and Cloudflare:
+
+1. **Option A (Instant Zero-Server Setup - 30 Seconds)**:
+   - Go to [https://app.tavily.com/home](https://app.tavily.com/home) and grab your free API key (`tvly-...`, 1,000 free searches/month).
+   - In SASUKE AI (Settings or 1-Tap Key Setup Wizard), paste your Tavily API Key and tap **Verify & Save**.
+   - Live web search activates immediately without deploying any server!
+
+2. **Option B (Cloudflare Worker Proxy - Dual Mode)**:
+   - Go to [Cloudflare API Tokens](https://dash.cloudflare.com/a3ed4c18631b54537803ca8e119779d1/api-tokens) (Account `a3ed4c18631b54537803ca8e119779d1`).
+   - Deploy this `/search-worker` for custom rate limiting, IP abuse filtering, and caching.
+   - Paste your worker URL in Settings and tap **Save Worker URL**.
 
 ---
 
 ## Architecture & Security Highlights
 
-1. **Zero Key Exposure**: `TAVILY_API_KEY` is stored strictly as an encrypted Cloudflare Secret. The Android app NEVER receives, stores, or sees the API key.
+1. **Dual Routing**: The app automatically uses your Cloudflare Worker if deployed, or falls back seamlessly to direct Tavily API.
 2. **Quota Conservation**: Restricts queries to `search_depth: "basic"` and maximum 5 results with bounded snippets to preserve the free monthly quota.
 3. **Abuse Protection & Rate Limiting**: Built-in 30 req/min per IP rate limiter prevents abusive query flooding.
 4. **Token Verification**: Supports Firebase Auth ID Token verification or an optional shared client secret.
@@ -17,8 +27,7 @@ This Cloudflare Worker provides a secure, rate-limited proxy to the [Tavily Sear
 ## Step-by-Step Setup and Deployment
 
 ### 1. Get a Free Tavily API Key
-1. Go to [https://app.tavily.com](https://app.tavily.com) and create a free account.
-2. Under **Overview / API Keys**, copy your free API key (`tvly-...`).
+1. Go to [https://app.tavily.com/home](https://app.tavily.com/home) and copy your free key (`tvly-...`).
 
 ### 2. Install Wrangler CLI
 Make sure you have Node.js 18+ installed on your computer.

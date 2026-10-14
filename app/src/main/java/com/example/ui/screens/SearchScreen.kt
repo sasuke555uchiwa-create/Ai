@@ -35,6 +35,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +57,14 @@ import com.example.data.model.AvailableModels
 import com.example.data.model.WebSource
 import com.example.data.remote.GeminiApiClient
 import com.example.ui.components.FormattedAiContent
+import com.example.ui.theme.SasukeAmberWarning
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material3.OutlinedButton
+import com.example.data.local.UserPreferences
+import com.example.ui.components.ApiKeySetupDialog
+import com.example.ui.theme.SasukeGreenSuccess
+import com.example.ui.viewmodel.ChatViewModel
 import com.example.ui.theme.SasukeCobaltBlue
 import com.example.ui.theme.SasukeElectricViolet
 import com.example.ui.theme.SasukeNeonCyan
@@ -70,10 +79,12 @@ import kotlinx.coroutines.tasks.await
 @Composable
 fun SearchScreen(
     apiClient: GeminiApiClient,
-    currentLanguage: AppLanguage
+    currentLanguage: AppLanguage,
+    chatViewModel: ChatViewModel? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val userPreferences = remember { UserPreferences(context) }
     val tavilyClient = remember { TavilySearchWorkerClient(context) }
     var queryText by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
@@ -82,6 +93,19 @@ fun SearchScreen(
     var latencyMs by remember { mutableStateOf(0L) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isUngroundedFallback by remember { mutableStateOf(false) }
+    var showKeySetupDialog by remember { mutableStateOf(false) }
+
+    if (showKeySetupDialog && chatViewModel != null) {
+        ApiKeySetupDialog(
+            chatViewModel = chatViewModel,
+            userPreferences = userPreferences,
+            onDismiss = { showKeySetupDialog = false },
+            onSaved = {
+                showKeySetupDialog = false
+                errorMessage = null
+            }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -99,26 +123,127 @@ fun SearchScreen(
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = null,
-                            tint = SasukeNeonCyan
-                        )
-                        Text(
-                            text = "Grounded AI Search",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Black,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = SasukeNeonCyan
+                            )
+                            Text(
+                                text = "Grounded AI Search",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Black,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // API Key Setup Button
+                        OutlinedButton(
+                            onClick = { showKeySetupDialog = true },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("search_screen_open_key_setup")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = SasukeNeonCyan
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("API Keys", fontSize = 11.sp, color = SasukeNeonCyan)
+                        }
                     }
+
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Real-time web grounding with verifiable citations, powered by Cloudflare Worker & Tavily Search.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+
+        // Configuration Status Banner
+        item {
+            if (!tavilyClient.isConfigured()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.fillMaxWidth().testTag("search_unconfigured_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Warning, contentDescription = null, tint = SasukeAmberWarning)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Web Search Keys Not Configured",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = SasukeAmberWarning
+                            )
+                            Text(
+                                text = "Add a free Tavily API Key (1,000 free searches/mo) or Cloudflare Worker URL to activate live web search.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Button(
+                            onClick = { showKeySetupDialog = true },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = SasukeNeonCyan),
+                            modifier = Modifier.testTag("banner_setup_keys_button")
+                        ) {
+                            Text("Setup Key", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.scrim)
+                        }
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = SasukeGreenSuccess.copy(alpha = 0.10f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SasukeGreenSuccess.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth().testTag("search_configured_pill")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = SasukeGreenSuccess,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Ready: " + tavilyClient.getActiveConfigurationLabel(),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = SasukeGreenSuccess,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        TextButton(
+                            onClick = { showKeySetupDialog = true },
+                            modifier = Modifier.testTag("search_edit_keys_button")
+                        ) {
+                            Text("Edit Key", fontSize = 11.sp, color = SasukeNeonCyan)
+                        }
+                    }
                 }
             }
         }
@@ -148,7 +273,8 @@ fun SearchScreen(
                     onClick = {
                         if (queryText.isNotBlank() && !isSearching) {
                             if (!tavilyClient.isConfigured()) {
-                                errorMessage = "Search Worker URL is not configured. Please enter your Cloudflare Worker URL in Settings, or tap 'Ask Standard AI' below to query Gemini without web search."
+                                errorMessage = "Search is not configured. Add your Tavily API Key or Cloudflare Worker URL, or tap 'Ask Standard AI' below."
+                                showKeySetupDialog = true
                                 return@Button
                             }
 

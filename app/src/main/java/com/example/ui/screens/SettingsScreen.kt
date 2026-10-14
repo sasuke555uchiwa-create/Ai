@@ -59,6 +59,25 @@ import com.example.data.model.AppStrings
 import com.example.data.remote.GeminiApiClient
 import com.example.data.auth.UserAuthManager
 import com.example.ui.components.UserAuthCard
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.CloudQueue
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import com.example.ui.components.ApiKeySetupDialog
+import com.example.data.remote.TavilySearchWorkerClient
 import com.example.ui.theme.SasukeCobaltBlue
 import com.example.ui.theme.SasukeElectricViolet
 import com.example.ui.theme.SasukeGreenSuccess
@@ -82,6 +101,16 @@ fun SettingsScreen(
     val apiClient = chatViewModel.apiClient
     var customKeyInput by remember { mutableStateOf(apiClient.getEffectiveApiKey()) }
     val isKeyConfigured = apiClient.isApiKeyConfigured()
+    var showKeySetupDialog by remember { mutableStateOf(false) }
+
+    if (showKeySetupDialog) {
+        ApiKeySetupDialog(
+            chatViewModel = chatViewModel,
+            userPreferences = userPreferences,
+            onDismiss = { showKeySetupDialog = false },
+            onSaved = { showKeySetupDialog = false }
+        )
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -281,71 +310,208 @@ fun SettingsScreen(
             }
         }
 
-        // Web Search Provider (Cloudflare Worker + Tavily)
+        // Web Search Provider & API Keys (Tavily & Cloudflare)
         item {
             val tavilyClient = chatViewModel.tavilyWorkerClient
-            var searchWorkerUrlInput by remember { mutableStateOf(tavilyClient.getWorkerUrl()) }
-            var isCheckingHealth by remember { mutableStateOf(false) }
+            val uriHandler = LocalUriHandler.current
+            val clipboardManager = LocalClipboardManager.current
             val scope = rememberCoroutineScope()
-            val isWorkerConfigured = searchWorkerUrlInput.trim().isNotEmpty() && searchWorkerUrlInput.startsWith("http")
+
+            var tavilyKeyInput by remember { mutableStateOf(tavilyClient.getTavilyApiKey()) }
+            var searchWorkerUrlInput by remember { mutableStateOf(tavilyClient.getWorkerUrl()) }
+            var isShowTavilyKey by remember { mutableStateOf(false) }
+
+            var isVerifyingTavilyKey by remember { mutableStateOf(false) }
+            var tavilyKeyTestResult by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+
+            var isCheckingHealth by remember { mutableStateOf(false) }
+
+            val isConfigured = tavilyClient.isConfigured()
+            val isWorkerConfigured = tavilyClient.isWorkerConfigured()
+            val isTavilyKeyConfigured = tavilyClient.isTavilyKeyConfigured()
 
             Surface(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.fillMaxWidth().testTag("settings_search_provider_card")
             ) {
-                Column(modifier = Modifier.padding(14.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    // Header Row
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Language,
-                            contentDescription = null,
-                            tint = SasukeNeonCyan
-                        )
-                        Text(
-                            text = "Web Search Provider (Cloudflare Worker + Tavily)",
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isWorkerConfigured) Icons.Default.CheckCircle else Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = if (isWorkerConfigured) SasukeGreenSuccess else SasukeAmberWarning
-                        )
-                        Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = null,
+                                tint = SasukeNeonCyan
+                            )
                             Text(
-                                text = if (isWorkerConfigured) "Worker Endpoint Configured" else "Worker Endpoint Not Configured",
-                                style = MaterialTheme.typography.bodyMedium,
+                                text = "Web Search & API Keys",
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isWorkerConfigured) SasukeGreenSuccess else SasukeAmberWarning
+                                color = MaterialTheme.colorScheme.primary
                             )
-                            Text(
-                                text = "Provider: Cloudflare Worker + Tavily Search API (1,000 free searches/mo)",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+
+                        // Quick Wizard Button
+                        OutlinedButton(
+                            onClick = { showKeySetupDialog = true },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("open_key_setup_wizard_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = SasukeNeonCyan
                             )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("1-Tap Wizard", fontSize = 11.sp, color = SasukeNeonCyan)
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Status Badge Card
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isConfigured) SasukeGreenSuccess.copy(alpha = 0.12f) else SasukeAmberWarning.copy(alpha = 0.12f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (isConfigured) SasukeGreenSuccess.copy(alpha = 0.4f) else SasukeAmberWarning.copy(alpha = 0.4f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isConfigured) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = if (isConfigured) SasukeGreenSuccess else SasukeAmberWarning,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = if (isConfigured) "Web Search Ready: " + tavilyClient.getActiveConfigurationLabel() else "Web Search Not Configured",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isConfigured) SasukeGreenSuccess else SasukeAmberWarning
+                                )
+                                Text(
+                                    text = if (isConfigured) "Real-time grounded research active with live citations." else "Add a free Tavily API Key or Cloudflare Worker URL below to activate live search.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // --- SECTION 1: Tavily API Key (Instant Zero-Server Setup) ---
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Key,
+                                contentDescription = null,
+                                tint = SasukeNeonCyan,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Tavily Search API Key (Instant)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // Link button to app.tavily.com
+                        OutlinedButton(
+                            onClick = {
+                                try {
+                                    uriHandler.openUri(TavilySearchWorkerClient.TAVILY_DASHBOARD_URL)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Visit: https://app.tavily.com/home", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("settings_open_tavily_link")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.OpenInNew,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = SasukeNeonCyan
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("app.tavily.com", fontSize = 11.sp, color = SasukeNeonCyan)
+                        }
+                    }
+
+                    Text(
+                        text = "Get 1,000 free searches/month at app.tavily.com. Works instantly without server setup!",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     OutlinedTextField(
-                        value = searchWorkerUrlInput,
-                        onValueChange = { searchWorkerUrlInput = it },
-                        label = { Text("Cloudflare Worker Search URL") },
-                        placeholder = { Text("https://sasuke-search-worker.<subdomain>.workers.dev") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("search_worker_url_input"),
+                        value = tavilyKeyInput,
+                        onValueChange = {
+                            tavilyKeyInput = it
+                            tavilyKeyTestResult = null
+                        },
+                        label = { Text("Tavily API Key (tvly-...)") },
+                        placeholder = { Text("tvly-xxxxxxxxxxxxxxxxxxxx") },
+                        visualTransformation = if (isShowTavilyKey) VisualTransformation.None else PasswordVisualTransformation(),
+                        singleLine = true,
+                        trailingIcon = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { isShowTavilyKey = !isShowTavilyKey }) {
+                                    Icon(
+                                        imageVector = if (isShowTavilyKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (isShowTavilyKey) "Hide" else "Show",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val clip = clipboardManager.getText()?.text?.trim().orEmpty()
+                                        if (clip.isNotEmpty()) {
+                                            tavilyKeyInput = clip
+                                            tavilyKeyTestResult = null
+                                            Toast.makeText(context, "Pasted from clipboard", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("settings_paste_tavily_key")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentPaste,
+                                        contentDescription = "Paste",
+                                        tint = SasukeNeonCyan,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().testTag("settings_tavily_key_input"),
                         shape = RoundedCornerShape(10.dp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = SasukeNeonCyan,
@@ -354,12 +520,184 @@ fun SettingsScreen(
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Test connection button
+                        Button(
+                            onClick = {
+                                if (tavilyKeyInput.isNotBlank()) {
+                                    isVerifyingTavilyKey = true
+                                    tavilyKeyTestResult = null
+                                    scope.launch {
+                                        val res = tavilyClient.verifyTavilyKey(tavilyKeyInput)
+                                        isVerifyingTavilyKey = false
+                                        tavilyKeyTestResult = res
+                                        if (res.first) {
+                                            Toast.makeText(context, "Key verified! 1,000 monthly credits active.", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, res.second, Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Please enter your Tavily Key first.", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = !isVerifyingTavilyKey && tavilyKeyInput.isNotBlank(),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                            modifier = Modifier.testTag("settings_verify_tavily_button")
+                        ) {
+                            if (isVerifyingTavilyKey) {
+                                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Verifying...", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                            } else {
+                                Text("Verify Key", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                tavilyClient.saveTavilyApiKey(tavilyKeyInput.trim())
+                                userPreferences.setTavilyApiKey(tavilyKeyInput.trim())
+                                chatViewModel.checkGroundingStatus()
+                                Toast.makeText(context, "Tavily API Key saved successfully!", Toast.LENGTH_SHORT).show()
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),
+                            modifier = Modifier.testTag("settings_save_tavily_key_button")
+                        ) {
+                            Text("Save Tavily Key", fontSize = 11.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(18.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    // --- SECTION 2: Cloudflare Worker Setup (Advanced) ---
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CloudQueue,
+                                contentDescription = null,
+                                tint = SasukeElectricViolet,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Cloudflare Worker Proxy (Optional)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // Link button to dash.cloudflare.com/api-tokens
+                        OutlinedButton(
+                            onClick = {
+                                try {
+                                    uriHandler.openUri(TavilySearchWorkerClient.CLOUDFLARE_TOKENS_URL)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Visit: dash.cloudflare.com", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.testTag("settings_open_cloudflare_link")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.OpenInNew,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = SasukeElectricViolet
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Cloudflare Tokens", fontSize = 11.sp, color = SasukeElectricViolet)
+                        }
+                    }
+
+                    // Cloudflare Account ID chip
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier
+                            .padding(vertical = 4.dp)
+                            .clickable {
+                                clipboardManager.setText(AnnotatedString(TavilySearchWorkerClient.CLOUDFLARE_ACCOUNT_ID))
+                                Toast.makeText(context, "Cloudflare Account ID copied!", Toast.LENGTH_SHORT).show()
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Copy",
+                                modifier = Modifier.size(12.dp),
+                                tint = SasukeElectricViolet
+                            )
+                            Text(
+                                text = "Cloudflare Account ID: " + TavilySearchWorkerClient.CLOUDFLARE_ACCOUNT_ID,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    OutlinedTextField(
+                        value = searchWorkerUrlInput,
+                        onValueChange = { searchWorkerUrlInput = it },
+                        label = { Text("Cloudflare Worker URL") },
+                        placeholder = { Text("https://sasuke-search-worker.<subdomain>.workers.dev") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("search_worker_url_input"),
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true,
+                        trailingIcon = {
+                            IconButton(
+                                onClick = {
+                                    val clip = clipboardManager.getText()?.text?.trim().orEmpty()
+                                    if (clip.isNotEmpty()) {
+                                        searchWorkerUrlInput = clip
+                                        Toast.makeText(context, "Pasted URL", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentPaste,
+                                    contentDescription = "Paste",
+                                    tint = SasukeElectricViolet,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = SasukeElectricViolet,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Button(
                             onClick = {
                                 if (searchWorkerUrlInput.isNotBlank()) {
@@ -382,17 +720,16 @@ fun SettingsScreen(
                             },
                             enabled = !isCheckingHealth && searchWorkerUrlInput.isNotBlank(),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.testTag("test_worker_connection_button")
                         ) {
                             Text(
                                 text = if (isCheckingHealth) "Testing..." else "Test Connection",
                                 color = MaterialTheme.colorScheme.primary,
-                                fontSize = 12.sp
+                                fontSize = 11.sp
                             )
                         }
 
-                        // Save button
                         Button(
                             onClick = {
                                 tavilyClient.saveWorkerUrl(searchWorkerUrlInput)
@@ -401,14 +738,16 @@ fun SettingsScreen(
                                 Toast.makeText(context, "Search Worker URL saved successfully!", Toast.LENGTH_SHORT).show()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),
-                            shape = RoundedCornerShape(10.dp),
+                            shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.testTag("save_worker_url_button")
                         ) {
-                            Text("Save Worker URL", fontSize = 12.sp)
+                            Text("Save Worker URL", fontSize = 11.sp)
                         }
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
+
+                    // Setup Instructions Card
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -416,14 +755,14 @@ fun SettingsScreen(
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
                             Text(
-                                text = "Setup Instructions:",
+                                text = "Easy Setup Guide:",
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = SasukeNeonCyan
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "1. Get a free Tavily API Key at app.tavily.com (1,000 free searches/mo).\n2. In /search-worker directory: run 'npx wrangler secret put TAVILY_API_KEY'.\n3. Deploy the worker with 'npx wrangler deploy'.\n4. Paste the generated worker URL above and tap Save Worker URL.",
+                                text = "• Option 1 (Zero-Server, 30s): Tap 'app.tavily.com', copy your free key (1,000 searches/mo), paste above, and tap 'Save Tavily Key'. Done!\n• Option 2 (Cloudflare Proxy): Deploy /search-worker via Wrangler or Cloudflare Dashboard, paste the worker URL, and tap 'Save Worker URL'.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp

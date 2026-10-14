@@ -203,15 +203,76 @@ class TavilySearchWorkerTest {
 
     @Test
     fun testWorkerUrlConfiguration() {
-        // Initially not configured or default
         client.saveWorkerUrl("  https://sasuke-search-worker.my-account.workers.dev/  ")
         assertEquals(
             "https://sasuke-search-worker.my-account.workers.dev",
             client.getWorkerUrl()
         )
+        assertTrue(client.isWorkerConfigured())
         assertTrue(client.isConfigured())
 
         client.saveWorkerUrl("")
-        assertFalse(client.isConfigured())
+        assertFalse(client.isWorkerConfigured())
+    }
+
+    @Test
+    fun testTavilyApiKeyConfiguration() {
+        client.saveTavilyApiKey("  tvly-test-1234567890abcdef  ")
+        assertEquals("tvly-test-1234567890abcdef", client.getTavilyApiKey())
+        assertTrue(client.isTavilyKeyConfigured())
+        assertTrue(client.isConfigured())
+
+        client.saveTavilyApiKey("")
+        assertFalse(client.isTavilyKeyConfigured())
+    }
+
+    @Test
+    fun testDirectTavilyApiResponseParsing_withContentField() {
+        // Direct Tavily API (api.tavily.com) uses 'content' instead of 'snippet'
+        val directTavilyJson = """
+            {
+                "query": "artificial intelligence advances 2026",
+                "results": [
+                    {
+                        "title": "AI Breakthroughs 2026",
+                        "url": "https://example.com/ai-2026",
+                        "content": "Deep reasoning models and multimodal grounding advance rapidly.",
+                        "score": 0.98,
+                        "published_date": "2026-03-20"
+                    }
+                ],
+                "response_time": 0.42
+            }
+        """.trimIndent()
+
+        val response = client.parseResponse(200, directTavilyJson, "artificial intelligence advances 2026")
+        assertTrue(response is TavilySearchResponse.Success)
+        val success = response as TavilySearchResponse.Success
+        assertEquals(1, success.results.size)
+        assertEquals("https://example.com/ai-2026", success.results[0].url)
+        assertEquals("AI Breakthroughs 2026", success.results[0].title)
+        assertTrue(success.results[0].snippet.contains("Deep reasoning models"))
+        assertEquals("2026-03-20", success.results[0].publishedDate)
+    }
+
+    @Test
+    fun testActiveConfigurationLabels() {
+        // Clear all
+        client.saveWorkerUrl("")
+        client.saveTavilyApiKey("")
+        assertEquals("Not Configured", client.getActiveConfigurationLabel())
+
+        // Tavily direct only
+        client.saveTavilyApiKey("tvly-direct-key-123")
+        assertTrue(client.getActiveConfigurationLabel().contains("Direct Tavily"))
+
+        // Worker only
+        client.saveTavilyApiKey("")
+        client.saveWorkerUrl("https://sasuke-search.workers.dev")
+        assertTrue(client.getActiveConfigurationLabel().contains("Cloudflare Worker"))
+
+        // Both
+        client.saveTavilyApiKey("tvly-direct-key-123")
+        assertTrue(client.getActiveConfigurationLabel().contains("Dual Mode"))
     }
 }

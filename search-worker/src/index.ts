@@ -194,12 +194,12 @@ export default {
         );
       }
 
-      // Check Tavily API Key in Worker secrets
-      const tavilyApiKey = env.TAVILY_API_KEY?.trim();
+      // Check Tavily API Key in client headers or Worker secrets
+      const tavilyApiKey = (request.headers.get("X-Tavily-Key") || env.TAVILY_API_KEY || "").trim();
       if (!tavilyApiKey) {
         return jsonResponse(
           {
-            error: "Tavily API key is not configured in Worker secrets. Run: npx wrangler secret put TAVILY_API_KEY",
+            error: "Tavily API key is not configured. Provide X-Tavily-Key header or run: npx wrangler secret put TAVILY_API_KEY",
             code: 503,
             is_unconfigured: true,
           },

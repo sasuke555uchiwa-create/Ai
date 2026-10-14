@@ -106,7 +106,7 @@ fun PlusToolsBottomSheet(
             icon = Icons.Default.Public,
             titleKey = "tool_search_web",
             descKey = "tool_search_web_desc",
-            badge = "Google Live",
+            badge = "Tavily Live",
             badgeColor = SasukeGreenSuccess,
             gradientColors = listOf(Color(0xFF06B6D4), Color(0xFF2563EB))
         ),

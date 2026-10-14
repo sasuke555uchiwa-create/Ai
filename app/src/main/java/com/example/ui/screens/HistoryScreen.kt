@@ -59,6 +59,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.platform.testTag
+
 @Composable
 fun HistoryScreen(
     chatViewModel: ChatViewModel,
@@ -69,6 +75,9 @@ fun HistoryScreen(
     val dao = db.appDao()
     val scope = rememberCoroutineScope()
     var sessions by remember { mutableStateOf<List<ChatSessionEntity>>(emptyList()) }
+    var searchQuery by remember { mutableStateOf("") }
+    var filteredSessions by remember { mutableStateOf<List<ChatSessionEntity>>(emptyList()) }
+    var matchingSnippets by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
     // Load sessions and trigger cloud sync
@@ -76,6 +85,37 @@ fun HistoryScreen(
         chatViewModel.syncCloudHistory()
         dao.getAllSessions().collect { list ->
             sessions = list
+        }
+    }
+
+    // Dynamic search filtering over sessions and messages
+    androidx.compose.runtime.LaunchedEffect(searchQuery, sessions) {
+        val q = searchQuery.trim()
+        if (q.isBlank()) {
+            filteredSessions = sessions
+            matchingSnippets = emptyMap()
+        } else {
+            val matchingMessages = dao.searchMessagesSnapshot(q)
+            val snippetMap = mutableMapOf<String, String>()
+            val matchingSessionIdsFromMessages = mutableSetOf<String>()
+
+            matchingMessages.forEach { msg ->
+                matchingSessionIdsFromMessages.add(msg.sessionId)
+                if (!snippetMap.containsKey(msg.sessionId)) {
+                    val idx = msg.text.indexOf(q, ignoreCase = true)
+                    val start = maxOf(0, idx - 25)
+                    val end = minOf(msg.text.length, idx + q.length + 35)
+                    val prefix = if (start > 0) "..." else ""
+                    val suffix = if (end < msg.text.length) "..." else ""
+                    snippetMap[msg.sessionId] = prefix + msg.text.substring(start, end).replace("\n", " ") + suffix
+                }
+            }
+
+            val matched = sessions.filter { session ->
+                session.title.contains(q, ignoreCase = true) || matchingSessionIdsFromMessages.contains(session.id)
+            }
+            filteredSessions = matched
+            matchingSnippets = snippetMap
         }
     }
 
@@ -128,6 +168,42 @@ fun HistoryScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Search Input Bar
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search conversations & messages...") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = SasukeNeonCyan
+                )
+            },
+            trailingIcon = {
+                if (searchQuery.isNotEmpty()) {
+                    IconButton(onClick = { searchQuery = "" }) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Clear search",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = SasukeNeonCyan,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("history_search_input")
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+
         // Cloud Sync Account Status
         val authManager = remember { UserAuthManager.getInstance(chatViewModel.getApplication()) }
         UserAuthCard(
@@ -150,14 +226,37 @@ fun HistoryScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        } else if (filteredSessions.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(36.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "No conversations matching \"$searchQuery\"",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         } else {
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(sessions, key = { it.id }) { session ->
+                items(filteredSessions, key = { it.id }) { session ->
                     val dateFormat = SimpleDateFormat("MMM dd, yyyy • HH:mm", Locale.getDefault())
                     val dateString = dateFormat.format(Date(session.createdAt))
+                    val snippet = matchingSnippets[session.id]
 
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -172,52 +271,80 @@ fun HistoryScreen(
                             }
                             .padding(12.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
+                        Column {
                             Row(
-                                modifier = Modifier.weight(1f),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.ChatBubbleOutline,
-                                    contentDescription = null,
-                                    tint = SasukeNeonCyan,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Column {
-                                    Text(
-                                        text = session.title,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1,
-                                        color = MaterialTheme.colorScheme.onSurface
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ChatBubbleOutline,
+                                        contentDescription = null,
+                                        tint = SasukeNeonCyan,
+                                        modifier = Modifier.size(20.dp)
                                     )
-                                    Text(
-                                        text = "$dateString • ${session.selectedModelId}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    Column {
+                                        Text(
+                                            text = session.title,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "$dateString • ${session.selectedModelId}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        scope.launch {
+                                            dao.deleteMessagesForSession(session.id)
+                                            dao.deleteSession(session.id)
+                                        }
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Delete",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
 
-                            IconButton(
-                                onClick = {
-                                    scope.launch {
-                                        dao.deleteMessagesForSession(session.id)
-                                        dao.deleteSession(session.id)
-                                    }
-                                },
-                                modifier = Modifier.size(32.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "Delete",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                            if (!snippet.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = null,
+                                        tint = SasukeNeonCyan,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = snippet,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 2
+                                    )
+                                }
                             }
                         }
                     }

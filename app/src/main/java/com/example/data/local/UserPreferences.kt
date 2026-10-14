@@ -32,6 +32,16 @@ class UserPreferences(context: Context) {
     )
     val searchWorkerUrl: StateFlow<String> = _searchWorkerUrl.asStateFlow()
 
+    private val _tavilyApiKey = MutableStateFlow(
+        prefs.getString("tavily_api_key", "") ?: ""
+    )
+    val tavilyApiKey: StateFlow<String> = _tavilyApiKey.asStateFlow()
+
+    private val _cloudflareToken = MutableStateFlow(
+        prefs.getString("cloudflare_api_token", "") ?: ""
+    )
+    val cloudflareToken: StateFlow<String> = _cloudflareToken.asStateFlow()
+
     fun setDarkTheme(enabled: Boolean) {
         _isDarkTheme.value = enabled
         prefs.edit().putBoolean("is_dark_theme", enabled).apply()
@@ -51,5 +61,25 @@ class UserPreferences(context: Context) {
         val trimmed = url.trim().removeSuffix("/")
         _searchWorkerUrl.value = trimmed
         prefs.edit().putString("search_worker_url", trimmed).apply()
+    }
+
+    fun setTavilyApiKey(key: String) {
+        val trimmed = key.trim()
+        _tavilyApiKey.value = trimmed
+        prefs.edit().putString("tavily_api_key", trimmed).apply()
+    }
+
+    fun getTavilyApiKey(): String {
+        return prefs.getString("tavily_api_key", "")?.trim() ?: ""
+    }
+
+    fun setCloudflareToken(token: String) {
+        val trimmed = token.trim()
+        _cloudflareToken.value = trimmed
+        prefs.edit().putString("cloudflare_api_token", trimmed).apply()
+    }
+
+    fun getCloudflareToken(): String {
+        return prefs.getString("cloudflare_api_token", "")?.trim() ?: ""
     }
 }
