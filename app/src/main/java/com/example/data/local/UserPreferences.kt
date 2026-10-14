@@ -27,6 +27,11 @@ class UserPreferences(context: Context) {
     )
     val selectedModel: StateFlow<String> = _selectedModel.asStateFlow()
 
+    private val _searchWorkerUrl = MutableStateFlow(
+        prefs.getString("search_worker_url", "") ?: ""
+    )
+    val searchWorkerUrl: StateFlow<String> = _searchWorkerUrl.asStateFlow()
+
     fun setDarkTheme(enabled: Boolean) {
         _isDarkTheme.value = enabled
         prefs.edit().putBoolean("is_dark_theme", enabled).apply()
@@ -40,5 +45,11 @@ class UserPreferences(context: Context) {
     fun setSelectedModel(modelId: String) {
         _selectedModel.value = modelId
         prefs.edit().putString("selected_model", modelId).apply()
+    }
+
+    fun setSearchWorkerUrl(url: String) {
+        val trimmed = url.trim().removeSuffix("/")
+        _searchWorkerUrl.value = trimmed
+        prefs.edit().putString("search_worker_url", trimmed).apply()
     }
 }

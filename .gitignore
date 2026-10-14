@@ -20,3 +20,9 @@ debug.keystore
 firebase-debug.log
 firestore-debug.log
 ui-debug.log
+node_modules/
+.dev.vars
+.wrangler/
+search-worker/node_modules/
+search-worker/.dev.vars
+search-worker/.wrangler/

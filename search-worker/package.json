@@ -1,0 +1,25 @@
+{
+  "name": "sasuke-search-worker",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker backend for SASUKE AI - Tavily Search API Proxy",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test test/worker.test.js"
+  },
+  "keywords": [
+    "cloudflare-worker",
+    "tavily-search",
+    "sasuke-ai",
+    "web-grounding"
+  ],
+  "author": "SASUKE AI",
+  "license": "MIT",
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250204.0",
+    "typescript": "^5.7.3",
+    "wrangler": "^3.107.3"
+  }
+}

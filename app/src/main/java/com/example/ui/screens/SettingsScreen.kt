@@ -64,6 +64,9 @@ import com.example.ui.theme.SasukeElectricViolet
 import com.example.ui.theme.SasukeGreenSuccess
 import com.example.ui.theme.SasukeNeonCyan
 import com.example.ui.theme.SasukeRedError
+import androidx.compose.runtime.rememberCoroutineScope
+import com.example.ui.theme.SasukeAmberWarning
+import kotlinx.coroutines.launch
 import com.example.ui.viewmodel.ChatViewModel
 
 @Composable
@@ -273,6 +276,159 @@ fun SettingsScreen(
                         modifier = Modifier.align(Alignment.End)
                     ) {
                         Text(AppStrings.get("save_key", currentLanguage), fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+
+        // Web Search Provider (Cloudflare Worker + Tavily)
+        item {
+            val tavilyClient = chatViewModel.tavilyWorkerClient
+            var searchWorkerUrlInput by remember { mutableStateOf(tavilyClient.getWorkerUrl()) }
+            var isCheckingHealth by remember { mutableStateOf(false) }
+            val scope = rememberCoroutineScope()
+            val isWorkerConfigured = searchWorkerUrlInput.trim().isNotEmpty() && searchWorkerUrlInput.startsWith("http")
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier.fillMaxWidth().testTag("settings_search_provider_card")
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Language,
+                            contentDescription = null,
+                            tint = SasukeNeonCyan
+                        )
+                        Text(
+                            text = "Web Search Provider (Cloudflare Worker + Tavily)",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isWorkerConfigured) Icons.Default.CheckCircle else Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = if (isWorkerConfigured) SasukeGreenSuccess else SasukeAmberWarning
+                        )
+                        Column {
+                            Text(
+                                text = if (isWorkerConfigured) "Worker Endpoint Configured" else "Worker Endpoint Not Configured",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isWorkerConfigured) SasukeGreenSuccess else SasukeAmberWarning
+                            )
+                            Text(
+                                text = "Provider: Cloudflare Worker + Tavily Search API (1,000 free searches/mo)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = searchWorkerUrlInput,
+                        onValueChange = { searchWorkerUrlInput = it },
+                        label = { Text("Cloudflare Worker Search URL") },
+                        placeholder = { Text("https://sasuke-search-worker.<subdomain>.workers.dev") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("search_worker_url_input"),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = SasukeNeonCyan,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Test connection button
+                        Button(
+                            onClick = {
+                                if (searchWorkerUrlInput.isNotBlank()) {
+                                    isCheckingHealth = true
+                                    tavilyClient.saveWorkerUrl(searchWorkerUrlInput)
+                                    userPreferences.setSearchWorkerUrl(searchWorkerUrlInput)
+                                    scope.launch {
+                                        val healthy = tavilyClient.healthCheck()
+                                        isCheckingHealth = false
+                                        if (healthy) {
+                                            Toast.makeText(context, "Search Worker is reachable and healthy!", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, "Health check failed. Please verify your Worker URL.", Toast.LENGTH_LONG).show()
+                                        }
+                                        chatViewModel.checkGroundingStatus()
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Please enter a Worker URL first.", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            enabled = !isCheckingHealth && searchWorkerUrlInput.isNotBlank(),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.testTag("test_worker_connection_button")
+                        ) {
+                            Text(
+                                text = if (isCheckingHealth) "Testing..." else "Test Connection",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        // Save button
+                        Button(
+                            onClick = {
+                                tavilyClient.saveWorkerUrl(searchWorkerUrlInput)
+                                userPreferences.setSearchWorkerUrl(searchWorkerUrlInput)
+                                chatViewModel.checkGroundingStatus()
+                                Toast.makeText(context, "Search Worker URL saved successfully!", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = SasukeCobaltBlue),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.testTag("save_worker_url_button")
+                        ) {
+                            Text("Save Worker URL", fontSize = 12.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text(
+                                text = "Setup Instructions:",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = SasukeNeonCyan
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "1. Get a free Tavily API Key at app.tavily.com (1,000 free searches/mo).\n2. In /search-worker directory: run 'npx wrangler secret put TAVILY_API_KEY'.\n3. Deploy the worker with 'npx wrangler deploy'.\n4. Paste the generated worker URL above and tap Save Worker URL.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp
+                            )
+                        }
                     }
                 }
             }

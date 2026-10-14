@@ -400,7 +400,7 @@ fun ChatScreen(
                 },
                 title = {
                     Text(
-                        text = "Google Search Grounding Unavailable",
+                        text = "Web Search Provider Setup",
                         fontWeight = FontWeight.Bold
                     )
                 },
@@ -412,7 +412,7 @@ fun ChatScreen(
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "Grounding with Google Search requires an active billing account and search quota linked to your Google Cloud / AI Studio project.\n\nRegular Gemini chat does not require search quota and continues to work normally.",
+                            text = "To enable live web search with clickable sources without paid Google billing, configure your Cloudflare Worker URL (Tavily Search proxy) in Settings.\n\nRegular Gemini chat works normally without web search.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -431,7 +431,7 @@ fun ChatScreen(
                         viewModel.dismissSearchUnavailableDialog()
                         onNavigateToSettings()
                     }) {
-                        Text("API Key Settings")
+                        Text("Configure in Settings")
                     }
                 }
             )
